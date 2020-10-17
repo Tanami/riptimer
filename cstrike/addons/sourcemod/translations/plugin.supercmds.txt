@@ -1,0 +1,161 @@
+"Phrases"
+{
+	"You"
+	{
+		"#format"		"{1:s}"
+		"en"			"You have {1}"
+	}
+
+	"Client"
+	{
+		"#format"		"{1:s},{2:s}"
+		"en"			"Client {1} has {2}"
+	}	
+
+	"Frozen"
+	{
+		"en"			"been frozen"
+	}
+
+
+	"Normal Movement"
+	{
+		"en"			"been returned to normal movement speed"
+	}
+	
+	"Custom Movement"
+	{
+		"#format"		"{1:2.1f}"
+		"en"			"been given {1} times normal speed"
+	}
+
+	"Location"
+	{
+		"#format"		"{1:s},{2:2.1f},{3:2.1f},{4:2.1f}"
+		"en"			"The location of \"{1}\" is {2},{3},{4}"
+	}
+	
+	"Save Location"
+	{
+		"#format"		"{1:i}"
+		"en"			"Your Location has been saved as number {1}. Use sm_teleport <name/#userid> <#{1}> to use it"
+	}
+	
+	"Teleport"
+	{
+		"#format"		"{1:f},{2:f},{3:f}"
+		"en"			"been teleported to {1},{2},{3}"
+	}
+
+	"Exec"
+	{
+		"en"			"had a command executed upon you"
+	}
+
+
+	"God"
+	{
+		"en"			"been given god mode"
+	}
+
+	"NoGod"
+	{
+		"en"			"had god mode removed"
+	}
+
+	"NV Give"
+	{
+		"en"			"been given nightvision goggles"
+	}
+
+	"NV Remove"
+	{
+		"en"			"had nightvision goggles removed"
+	}
+
+	"Defuse Give"
+	{
+		"en"			"been given a defuse kit"
+	}
+
+	"Defuse Remove"
+	{
+		"en"			"had a defuse kit removed"
+	}
+
+	"Helmet Give"
+	{
+		"en"			"been given a helmet"
+	}
+
+	"Helmet Remove"
+	{
+		"en"			"had a helmet removed"
+	}
+
+	"Team"
+	{
+		"#format"		"{1:s}"
+		"en"			"You have been moved to the {1} team"
+	}
+
+	"Extend"
+	{
+		"#format"		"{1:i}"
+		"en"			"The Map has Been extended for {1} minutes"
+	}
+
+	"Swapped"
+	{
+		"en"			"been swapped team"
+	}
+
+	"Shutdown"
+	{
+		"en"			"The Server is now shutting down"
+	}
+
+	"Weapon"
+	{
+		"#format"		"{1:s}"
+		"en"			"been given {1}"
+	}
+
+	"Armour"
+	{
+		"#format"		"{1:i}"
+		"en"			"had your armour set to: {1}"
+	}
+
+	"Bury"
+	{
+		"en"			"been buried"
+	}
+
+	"UnBury"
+	{
+		"en"			"been unburied"
+	}
+
+	"Respawn"
+	{
+		"en"			"been respawned"
+	}
+
+	"Disarm"
+	{
+		"en"			"been disarmed"
+	}
+
+	"Name"
+	{
+		"#format"		"{1:s}"
+		"en"			"had name changed to {1}"
+	}
+
+	"Health"
+	{
+		"#format"		"{1:i}"
+		"en"			"had your health set to: {1}"
+	}
+}

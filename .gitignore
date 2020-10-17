@@ -23,9 +23,9 @@
 
 !cstrike/addons/sourcemod/*
 !cstrike/addons/sourcemod/scripting/**
-!cstrike/addons/sourcemod/translations/*
-!cstrike/addons/sourcemod/extensions/*
-!cstrike/addons/sourcemod/configs/*
+!cstrike/addons/sourcemod/translations/**
+!cstrike/addons/sourcemod/extensions/**
+!cstrike/addons/sourcemod/configs/**
 cstrike/addons/sourcemod/configs/databases.cfg
 cstrike/addons/sourcemod/configs/admins_simple.ini
 
