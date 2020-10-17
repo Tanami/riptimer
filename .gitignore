@@ -6,6 +6,11 @@
 !cstrike/cfg/sourcemod/**
 !cstrike/cfg/ssj/**
 
+# lol
+!cstrike/cfg/banned_ip.cfg
+!cstrike/cfg/banned_user.cfg
+!cstrike/cfg/cannounce.cfg
+
 # fastdl stuff
 !cstrike/sound/**
 !cstrike/sprites/**
