@@ -1,0 +1,28 @@
+*
+!*/
+!.gitignore
+
+# configs
+!cstrike/cfg/sourcemod/**
+!cstrike/cfg/ssj/**
+
+# fastdl stuff
+!cstrike/sound/**
+!cstrike/sprites/**
+!cstrike/materials/**
+!cstrike/models/**
+
+# not including addons/stripper cuz it's too big (213MB)
+!cstrike/addons/*
+!cstrike/addons/metamod/**
+
+!cstrike/addons/sourcemod/*
+!cstrike/addons/sourcemod/scripting/**
+!cstrike/addons/sourcemod/translations/*
+!cstrike/addons/sourcemod/extensions/*
+!cstrike/addons/sourcemod/configs/*
+cstrike/addons/sourcemod/configs/databases.cfg
+cstrike/addons/sourcemod/configs/admins_simple.ini
+
+# we are including this because some of our plugins do not have the source available
+!cstrike/addons/sourcemod/plugins/**
