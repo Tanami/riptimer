@@ -1,0 +1,15 @@
+"Phrases"
+{
+	"ChickenSpawned"
+	{
+		"hu"			"[SM] Csirke spawnolva!"
+	}
+	"CantSpawnHere"
+	{
+		"hu"			"[SM] Nem spawnolhatsz ide csirkét!"
+	}
+	"OnlyAlive"
+	{
+		"hu"			"[SM] Csak élő játékos használhatja!"
+	}
+}

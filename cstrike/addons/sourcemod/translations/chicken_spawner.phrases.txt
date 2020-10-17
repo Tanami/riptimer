@@ -1,0 +1,15 @@
+"Phrases"
+{
+	"ChickenSpawned"
+	{
+		"en"			"[SM] Chicken spawned!"
+	}
+	"CantSpawnHere"
+	{
+		"en"			"[SM] You cant spawn chicken here!"
+	}
+	"OnlyAlive"
+	{
+		"en"			"[SM] Only alive player can use this!"
+	}
+}
