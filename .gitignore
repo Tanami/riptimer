@@ -1,6 +1,7 @@
 *
 !*/
 !.gitignore
+!README.md
 
 # configs
 !cstrike/cfg/sourcemod/**
