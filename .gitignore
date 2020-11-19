@@ -5,6 +5,7 @@
 
 # configs
 !cstrike/cfg/sourcemod/**
+cstrike/cfg/sourcemod/plugin.sourcejump.cfg
 !cstrike/cfg/ssj/**
 
 # lol
