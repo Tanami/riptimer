@@ -100,6 +100,11 @@
 		"#format"	"{1:s},{2:s},{3:s},{4:s},{5:s}"
 		"en"		"{1}You {2}cannot{3} pause in the {4}start zone{5}."
 	}
+	"PauseMoving"
+	{
+		"#format"	"{1:s},{2:s}"
+		"en"		"You {1}are not{2} allowed to pause while moving."
+	}
 	"TimerUnpaused"
 	{
 		"#format"	"{1:s},{2:s}"
@@ -120,5 +125,15 @@
 	{
 		"#format"	"{1:s},{2:s}"
 		"en"		"You {1}can't{2} teleport as an end zone for the map is not defined."
+	}
+	"DebugOffsets"
+	{
+		"#format"	"{1:f},{2:s}"
+		"en"		"Your time offset was {1}. The distance was {2} units."
+	}
+	"TrackChangeFromMain"
+	{
+		"#format"	"{1:s},{2:s},{3:s},{4:s}"
+		"en"		"Use {1}!m{2}/{3}!main{4} go to back to the main track."
 	}
 }

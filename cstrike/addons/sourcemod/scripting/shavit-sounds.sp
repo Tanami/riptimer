@@ -20,6 +20,7 @@
 
 #include <sourcemod>
 #include <sdktools>
+#include <convar_class>
 
 #undef REQUIRE_PLUGIN
 #include <shavit>
@@ -37,7 +38,10 @@ ArrayList gA_NoImprovementSounds = null;
 StringMap gSM_RankSounds = null;
 
 // cvars
-ConVar gCV_MinimumWorst = null;
+Convar gCV_MinimumWorst = null;
+Convar gCV_Enabled = null;
+
+Handle gH_OnPlaySound = null;
 
 public Plugin myinfo =
 {
@@ -78,9 +82,12 @@ public void OnPluginStart()
 	gB_HUD = LibraryExists("shavit-hud");
 
 	// cvars
-	gCV_MinimumWorst = CreateConVar("shavit_sounds_minimumworst", "10", "Minimum amount of records to be saved for a \"worst\" sound to play.", 0, true, 1.0);
+	gCV_MinimumWorst = new Convar("shavit_sounds_minimumworst", "10", "Minimum amount of records to be saved for a \"worst\" sound to play.", 0, true, 1.0);
+	gCV_Enabled = new Convar("shavit_sounds_enabled", "1", "Enables/Disables functionality of the plugin", 0, true, 0.0, true, 1.0);
 
-	AutoExecConfig();
+	Convar.AutoExecConfig();
+
+	gH_OnPlaySound = CreateGlobalForward("Shavit_OnPlaySound", ET_Event, Param_Cell, Param_String, Param_Cell, Param_Array, Param_CellByRef);
 }
 
 public void OnLibraryAdded(const char[] name)
@@ -113,7 +120,7 @@ public void OnMapStart()
 
 	File fFile = OpenFile(sFile, "r"); // readonly, unless i implement in-game editing
 
-	if(fFile == null)
+	if(fFile == null && gCV_Enabled.BoolValue)
 	{
 		SetFailState("Cannot open \"configs/shavit-sounds.cfg\". Make sure this file exists and that the server has read permissions to it.");
 	}
@@ -185,6 +192,11 @@ public void OnMapStart()
 
 public void Shavit_OnFinish(int client, int style, float time, int jumps, int strafes, float sync, int track, float oldtime, float perfs)
 {
+	if(!gCV_Enabled.BoolValue)
+	{
+		return;
+	}
+
 	if(oldtime != 0.0 && time > oldtime && gA_NoImprovementSounds.Length != 0)
 	{
 		char sSound[PLATFORM_MAX_PATH];
@@ -196,6 +208,11 @@ public void Shavit_OnFinish(int client, int style, float time, int jumps, int st
 
 public void Shavit_OnFinish_Post(int client, int style, float time, int jumps, int strafes, float sync, int rank, int overwrite, int track)
 {
+	if(!gCV_Enabled.BoolValue)
+	{
+		return;
+	}
+
 	float fOldTime = Shavit_GetClientPB(client, style, track);
 
 	char sSound[PLATFORM_MAX_PATH];
@@ -234,6 +251,11 @@ public void Shavit_OnFinish_Post(int client, int style, float time, int jumps, i
 
 public void Shavit_OnWorstRecord(int client, int style, float time, int jumps, int strafes, float sync, int track)
 {
+	if(!gCV_Enabled.BoolValue)
+	{
+		return;
+	}
+
 	if(gA_WorstSounds.Length != 0 && Shavit_GetRecordAmount(style, track) >= gCV_MinimumWorst.IntValue)
 	{
 		char sSound[PLATFORM_MAX_PATH];
@@ -246,9 +268,9 @@ public void Shavit_OnWorstRecord(int client, int style, float time, int jumps, i
 	}
 }
 
-void PlayEventSound(int client, bool everyone, char[] sound)
+void PlayEventSound(int client, bool everyone, char sound[PLATFORM_MAX_PATH])
 {
-	int[] clients = new int[MaxClients];
+	int clients[MAXPLAYERS+1];
 	int count = 0;
 
 	for(int i = 1; i <= MaxClients; i++)
@@ -272,6 +294,20 @@ void PlayEventSound(int client, bool everyone, char[] sound)
 		{
 			clients[count++] = i;
 		}
+	}
+
+	Action result = Plugin_Continue;
+	Call_StartForward(gH_OnPlaySound);
+	Call_PushCell(client);
+	Call_PushStringEx(sound, PLATFORM_MAX_PATH, SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+	Call_PushCell(PLATFORM_MAX_PATH);
+	Call_PushArrayEx(clients, MaxClients, SM_PARAM_COPYBACK);
+	Call_PushCellRef(count);
+	Call_Finish(result);
+
+	if(result != Plugin_Continue && result != Plugin_Changed)
+	{
+		return;
 	}
 
 	if(count > 0)

@@ -38,11 +38,6 @@
 		"en"		"Could not delete replay for {1}{2}{3}."
 	}
 	// ---------- Central Replay Menu ---------- //
-	"CentralReplaySpectator"
-	{
-		"#format"	"{1:s},{2:s},{3:s},{4:s}"
-		"en"		"You have to {1}spectate{2} the {3}central bot{4} to use this feature."
-	}
 	"CentralReplayTitle"
 	{
 		"en"		"Select a replay style to play:"
@@ -62,5 +57,33 @@
 	"CentralReplayTrack"
 	{
 		"en"		"Select a track to play:"
+	}
+	"Replay_Central"
+	{
+		"en"		"!replay"
+	}
+	"Replay_Dynamic"
+	{
+		"en"		"Dynamic"
+	}
+	"Replay_Looping"
+	{
+		"en"		"Looping"
+	}
+	"Menu_ReplayBotType"
+	{
+		"en"		"Replay bot type:"
+	}
+	"Menu_Replay_Central"
+	{
+		"en"		"Central !replay bot"
+	}
+	"Menu_Replay_Dynamic"
+	{
+		"en"		"Spawn dynamic bot"
+	}
+	"Menu_Replay_Prop"
+	{
+		"en"		"Spawn physics prop bot"
 	}
 }

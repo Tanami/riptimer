@@ -76,11 +76,6 @@
 	{
 		"en"		"You can teleport only if you are alive."
 	}
-	"TeleportInZone"
-	{
-		"#format"	"{1:s},{2:s},{3:s},{4:s}"
-		"en"		"You {1}cannot teleport{2} inside the {3}start/end zones{4}."
-	}
 	"TeleportInvalidTarget"
 	{
 		"en"		"Invalid target."
@@ -177,6 +172,10 @@
 	{
 		"en"		"Reset checkpoints"
 	}
+	"MiscCheckpointDeleteCurrent"
+	{
+		"en"		"Delete current checkpoint"
+	}
 	"MiscCheckpointPause"
 	{
 		"en"		"Pause"
@@ -199,5 +198,13 @@
 	{
 		"#format"	"{1:s},{2:s}"
 		"en"		"{1}NEW {2} WR!!!"
+	}
+	"AdvertisementsEnabled"
+	{
+		"en"		"Advertisements enabled"
+	}
+	"AdvertisementsDisabled"
+	{
+		"en"		"Advertisements disabled"
 	}
 }
