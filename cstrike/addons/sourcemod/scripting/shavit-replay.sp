@@ -32,6 +32,9 @@
 #include <tf2>
 #include <tf2_stocks>
 
+//#include <TickRateControl>
+forward void TickRate_OnTickRateChanged(float fOld, float fNew);
+
 #define REPLAY_FORMAT_V2 "{SHAVITREPLAYFORMAT}{V2}"
 #define REPLAY_FORMAT_FINAL "{SHAVITREPLAYFORMAT}{FINAL}"
 #define REPLAY_FORMAT_SUBVERSION 0x04
@@ -71,7 +74,7 @@ enum struct bot_info_t
 	ReplayStatus iStatus; // Shavit_GetReplayStatus
 	ReplayBotType iType; // Shavit_GetReplayBotType
 	int iTrack; // Shavit_GetReplayBotTrack
-	int iStarterSerial; // TODO: Add Shavit_GetReplayStarter
+	int iStarterSerial; // Shavit_GetReplayStarter
 	int iTick; // Shavit_GetReplayBotCurrentFrame
 	int iLoopingConfig;
 	Handle hTimer;
@@ -216,6 +219,8 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_GetReplayBotStyle", Native_GetReplayBotStyle);
 	CreateNative("Shavit_GetReplayBotTrack", Native_GetReplayBotTrack);
 	CreateNative("Shavit_GetReplayBotType", Native_GetReplayBotType);
+	CreateNative("Shavit_GetReplayStarter", Native_GetReplayStarter);
+	CreateNative("Shavit_GetReplayButtons", Native_GetReplayButtons);
 	CreateNative("Shavit_GetReplayData", Native_GetReplayData);
 	CreateNative("Shavit_GetReplayFrames", Native_GetReplayFrames);
 	CreateNative("Shavit_GetReplayFrameCount", Native_GetReplayFrameCount);
@@ -281,6 +286,7 @@ public void OnPluginStart()
 
 	// game specific
 	gEV_Type = GetEngineVersion();
+	gF_Tickrate = (1.0 / GetTickInterval());
 
 	gCV_BotQuota = FindConVar((gEV_Type != Engine_TF2)? "bot_quota":"tf_bot_quota");
 	gCV_BotQuota.Flags &= ~FCVAR_NOTIFY;
@@ -860,6 +866,26 @@ public int Native_GetReplayBotTrack(Handle handler, int numParams)
 public int Native_GetReplayBotType(Handle handler, int numParams)
 {
 	return view_as<int>(gA_BotInfo[GetBotInfoIndex(GetNativeCell(1))].iType);
+}
+
+public int Native_GetReplayStarter(Handle handler, int numParams)
+{
+	int starter = gA_BotInfo[GetBotInfoIndex(GetNativeCell(1))].iStarterSerial;
+	return (starter > 0) ? GetClientFromSerial(starter) : 0;
+}
+
+public int Native_GetReplayButtons(Handle handler, int numParams)
+{
+	int bot = GetBotInfoIndex(GetNativeCell(1));
+
+	if (gA_BotInfo[bot].iStatus != Replay_Running)
+	{
+		return 0;
+	}
+
+	frame_t aFrame;
+	gA_BotInfo[bot].aCache.aFrames.GetArray(gA_BotInfo[bot].iTick, aFrame, 6);
+	return aFrame.buttons;
 }
 
 public int Native_Replay_DeleteMap(Handle handler, int numParams)
@@ -1844,8 +1870,6 @@ void UpdateReplayClient(int client)
 		return;
 	}
 
-	gF_Tickrate = (1.0 / GetTickInterval());
-
 	SetEntProp(client, Prop_Data, "m_CollisionGroup", 2);
 	SetEntityMoveType(client, MOVETYPE_NOCLIP);
 
@@ -1951,9 +1975,9 @@ public void OnClientDisconnect(int client)
 
 public Action Shavit_OnStart(int client)
 {
-	float fSpeed = Shavit_GetStyleSettingFloat(Shavit_GetBhopStyle(client), "speed");
+	int iMaxPreFrames = RoundToFloor(gCV_PlaybackPreRunTime.FloatValue * gF_Tickrate / Shavit_GetStyleSettingFloat(Shavit_GetBhopStyle(client), "speed"));
 
-	gI_PlayerPrerunFrames[client] = gA_PlayerFrames[client].Length - RoundToFloor(gCV_PlaybackPreRunTime.FloatValue * gF_Tickrate / fSpeed);
+	gI_PlayerPrerunFrames[client] = gA_PlayerFrames[client].Length - iMaxPreFrames;
 	if(gI_PlayerPrerunFrames[client] < 0)
 	{
 		gI_PlayerPrerunFrames[client] = 0;
@@ -1970,7 +1994,7 @@ public Action Shavit_OnStart(int client)
 	}
 	else
 	{
-		if(gA_PlayerFrames[client].Length >= RoundToFloor(gCV_PlaybackPreRunTime.FloatValue * gF_Tickrate / fSpeed))
+		if(gA_PlayerFrames[client].Length >= iMaxPreFrames)
 		{
 			gA_PlayerFrames[client].Erase(0);
 			gI_PlayerFrames[client]--;
@@ -3153,6 +3177,11 @@ void GetReplayName(int style, int track, char[] buffer, int length)
 	}
 
 	Shavit_GetWRName(style, buffer, length, track);
+}
+
+public void TickRate_OnTickRateChanged(float fOld, float fNew)
+{
+	gF_Tickrate = fNew;
 }
 
 public void OnGameFrame()
