@@ -209,14 +209,12 @@ public Action Command_Nextmap(int client, int args)
 	
 	if (mapchooser && EndOfMapVoteEnabled() && !HasEndOfMapVoteFinished())
 	{
-//		ReplyToCommand(client, "[SM] %t", "Pending Vote");			
-                PrintToServer("[SM] Next Map: Pending Vote");
+		ReplyToCommand(client, "[SM] %t", "Pending Vote");			
 	}
 	else
 	{
 		GetMapDisplayName(map, map, sizeof(map));
-//		ReplyToCommand(client, "[SM] %t", "Next Map", map);
-		PrintToServer("[SM] Next Map: %s", map);
+		ReplyToCommand(client, "[SM] %t", "Next Map", map);
 	}
 	
 	return Plugin_Handled;
