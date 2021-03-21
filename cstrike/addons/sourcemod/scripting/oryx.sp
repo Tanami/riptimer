@@ -22,7 +22,7 @@
 
 #undef REQUIRE_PLUGIN
 #include <shavit>
-#include <bTimes-tas>
+//#include <bTimes-tas>
 #include <bTimes-timer_hack>
 
 #pragma newdecls required
@@ -234,21 +234,6 @@ public int Native_CanBypass(Handle plugin, int numParams)
 			}
 		}
 
-		case Timer_Blacky2:
-		{
-			return TAS_InEditMode(client);
-		}
-
-		case Timer_Blacky183:
-		{
-			any styleconfig[StyleConfig];
-			Style_GetConfig(GetClientStyle(client), styleconfig);
-
-			if(StrContains(styleconfig[Special_Key], "oryx_bypass", false) != -1)
-			{
-				return true;
-			}
-		}
 	}
 
 	return false;

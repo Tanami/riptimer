@@ -175,7 +175,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	return SetupMove(client, buttons, mouse[0], angles[1], vel[0], vel[1]);
 }
 
-public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style, any stylesettings[sizeof(stylesettings)], int mouse[2])
+public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style, stylesettings_t stylesettings, int mouse[2])
 {
 	return SetupMove(client, buttons, mouse[0], angles[1], vel[0], vel[1]);
 }
@@ -357,5 +357,5 @@ void InvalidMoveTrigger(int client, const char[] sDescription, int buttons, floa
 
 	Oryx_LogMessage("%s", sLogMessage);
 	Oryx_PrintToAdminsConsole("%s", sLogMessage);
-	Oryx_Trigger(client, TRIGGER_DEFINITIVE, sDescription);
+	Oryx_Trigger(client, TRIGGER_HIGH_NOKICK, sDescription);
 }
