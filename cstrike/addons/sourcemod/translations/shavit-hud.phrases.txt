@@ -153,6 +153,14 @@
 	{
 		"en"		"Map tier"
 	}
+	"HudTimeDifference"
+	{
+		"en"		"Time Difference"
+	}
+	"HudTopLeftRankText"
+	{
+		"en"		"Top left Rank"
+	}
 	// ---------- Record Bots ---------- //
 	"ReplayText"
 	{
