@@ -50,7 +50,7 @@
 #define HUD_DEFAULT				(HUD_MASTER|HUD_CENTER|HUD_ZONEHUD|HUD_OBSERVE|HUD_TOPLEFT|HUD_SYNC|HUD_TIMELEFT|HUD_2DVEL|HUD_SPECTATORS)
 #define HUD_DEFAULT2			(HUD2_PERFS)
 
-#define MAX_HINT_SIZE 225
+#define MAX_HINT_SIZE 227
 
 enum ZoneHUD
 {
@@ -117,8 +117,12 @@ float gF_ConnectTime[MAXPLAYERS+1];
 bool gB_FirstPrint[MAXPLAYERS+1];
 int gI_PreviousSpeed[MAXPLAYERS+1];
 int gI_ZoneSpeedLimit[MAXPLAYERS+1];
+float gF_Angle[MAXPLAYERS+1];
+float gF_PreviousAngle[MAXPLAYERS+1];
+float gF_AngleDiff[MAXPLAYERS+1];
 
 bool gB_Late = false;
+char gS_HintPadding[MAX_HINT_SIZE];
 
 // hud handle
 Handle gH_HUD = null;
@@ -231,6 +235,11 @@ public void OnPluginStart()
 		..."HUD2_TOPLEFT_RANK				4096");
 
 	Convar.AutoExecConfig();
+
+	for (int i = 0; i < sizeof(gS_HintPadding) - 1; i++)
+	{
+		gS_HintPadding[i] = '\n';
+	}
 
 	// commands
 	RegConsoleCmd("sm_hud", Command_HUD, "Opens the HUD settings menu.");
@@ -382,9 +391,19 @@ public void Shavit_OnStyleConfigLoaded(int styles)
 	}
 }
 
+void MakeAngleDiff(int client, float newAngle)
+{
+	gF_PreviousAngle[client] = gF_Angle[client];
+	gF_Angle[client] = newAngle;
+
+	float fAngleDiff = newAngle - gF_PreviousAngle[client];
+	gF_AngleDiff[client] = fAngleDiff - 360.0 * RoundToFloor((fAngleDiff + 180.0) / 360.0);
+}
+
 public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style, stylesettings_t stylsettings)
 {
 	gI_Buttons[client] = buttons;
+	MakeAngleDiff(client, angles[1]);
 
 	for(int i = 1; i <= MaxClients; i++)
 	{
@@ -423,9 +442,17 @@ public void PostThinkPost(int client)
 {
 	int buttons = GetClientButtons(client);
 
-	if(gI_Buttons[client] != buttons)
+	float ang[3];
+	GetClientEyeAngles(client, ang);
+
+	if(gI_Buttons[client] != buttons || ang[1] != gF_Angle[client])
 	{
 		gI_Buttons[client] = buttons;
+
+		if (ang[1] != gF_Angle[client])
+		{
+			MakeAngleDiff(client, ang[1]);
+		}
 
 		for(int i = 1; i <= MaxClients; i++)
 		{
@@ -742,7 +769,7 @@ Action ShowHUDMenu(int client, int item)
 	}
 
 	menu.ExitButton = true;
-	menu.DisplayAt(client, item, 300);
+	menu.DisplayAt(client, item, MENU_TIME_FOREVER);
 
 	return Plugin_Handled;
 }
@@ -1531,7 +1558,7 @@ void UpdateMainHUD(int client)
 		{
 			if(gCV_UseHUDFix.BoolValue)
 			{
-				PrintCSGOHUDText(client, "%s", sBuffer);
+				PrintCSGOHUDText(client, sBuffer);
 			}
 			else
 			{
@@ -1584,10 +1611,12 @@ void UpdateKeyOverlay(int client, Panel panel, bool &draw)
 		FormatEx(sPanelLine, 64, " %d%s%d\n", gI_ScrollCount[target], (gI_ScrollCount[target] > 9)? "   ":"     ", gI_LastScrollCount[target]);
 	}
 
-	Format(sPanelLine, 128, "%s［%s］　［%s］\n　　 %s\n%s　 %s 　%s\n　%s　　%s", sPanelLine,
+	float fAngleDiff = IsValidClient(target) ? gF_AngleDiff[target] : 0.0;
+
+	Format(sPanelLine, 128, "%s［%s］　［%s］\n%s  %s  %s\n%s　 %s 　%s\n　%s　　%s", sPanelLine,
 		(buttons & IN_JUMP) > 0? "Ｊ":"ｰ", (buttons & IN_DUCK) > 0? "Ｃ":"ｰ",
-		(buttons & IN_FORWARD) > 0? "Ｗ":"ｰ", (buttons & IN_MOVELEFT) > 0? "Ａ":"ｰ",
-		(buttons & IN_BACK) > 0? "Ｓ":"ｰ", (buttons & IN_MOVERIGHT) > 0? "Ｄ":"ｰ",
+		(fAngleDiff > 0) ? "←":"   ", (buttons & IN_FORWARD) > 0 ? "Ｗ":"ｰ", (fAngleDiff < 0) ? "→":"",
+		(buttons & IN_MOVELEFT) > 0? "Ａ":"ｰ", (buttons & IN_BACK) > 0? "Ｓ":"ｰ", (buttons & IN_MOVERIGHT) > 0? "Ｄ":"ｰ",
 		(buttons & IN_LEFT) > 0? "Ｌ":" ", (buttons & IN_RIGHT) > 0? "Ｒ":" ");
 
 	panel.DrawItem(sPanelLine, ITEMDRAW_RAWLINE);
@@ -1632,12 +1661,13 @@ void UpdateCenterKeys(int client)
 	}
 
 	int buttons = IsValidClient(target) ? gI_Buttons[target] : Shavit_GetReplayButtons(target);
+	float fAngleDiff = IsValidClient(target) ? gF_AngleDiff[target] : 0.0;
 
 	char sCenterText[64];
-	FormatEx(sCenterText, 64, "　%s　　%s\n　　 %s\n%s　 %s 　%s\n　%s　　%s",
+	FormatEx(sCenterText, 64, "　%s　　%s\n%s　 %s 　%s\n%s　 %s 　%s\n　%s　　%s",
 		(buttons & IN_JUMP) > 0? "Ｊ":"ｰ", (buttons & IN_DUCK) > 0? "Ｃ":"ｰ",
-		(buttons & IN_FORWARD) > 0? "Ｗ":"ｰ", (buttons & IN_MOVELEFT) > 0? "Ａ":"ｰ",
-		(buttons & IN_BACK) > 0? "Ｓ":"ｰ", (buttons & IN_MOVERIGHT) > 0? "Ｄ":"ｰ",
+		(fAngleDiff > 0) ? "←":" ", (buttons & IN_FORWARD) > 0 ? "Ｗ":"ｰ", (fAngleDiff < 0) ? "→":" ",
+		(buttons & IN_MOVELEFT) > 0? "Ａ":"ｰ", (buttons & IN_BACK) > 0? "Ｓ":"ｰ", (buttons & IN_MOVERIGHT) > 0? "Ｄ":"ｰ",
 		(buttons & IN_LEFT) > 0? "Ｌ":" ", (buttons & IN_RIGHT) > 0? "Ｒ":" ");
 
 	int style = (Shavit_IsReplayEntity(target))? Shavit_GetReplayBotStyle(target):Shavit_GetBhopStyle(target);
@@ -1650,7 +1680,7 @@ void UpdateCenterKeys(int client)
 	char autobhop[4];
 	Shavit_GetStyleSetting(style, "autobhop", autobhop, 4);
 
-	if(gB_BhopStats && !StringToInt(autobhop))
+	if(gB_BhopStats && !StringToInt(autobhop) && IsValidClient(target))
 	{
 		Format(sCenterText, 64, "%s\n　　%d　%d", sCenterText, gI_ScrollCount[target], gI_LastScrollCount[target]);
 	}
@@ -1992,17 +2022,11 @@ public int Native_GetHUDSettings(Handle handler, int numParams)
 	return gI_HUDSettings[client];
 }
 
-void PrintCSGOHUDText(int client, const char[] format, any ...)
+void PrintCSGOHUDText(int client, const char[] str)
 {
 	char buff[MAX_HINT_SIZE];
-	VFormat(buff, sizeof(buff), format, 3);
-	Format(buff, sizeof(buff), "</font>%s ", buff);
-	
-	for(int i = strlen(buff); i < sizeof(buff); i++)
-	{
-		buff[i] = '\n';
-	}
-	
+	FormatEx(buff, sizeof(buff), "</font>%s%s", str, gS_HintPadding);
+
 	Protobuf pb = view_as<Protobuf>(StartMessageOne("TextMsg", client, USERMSG_RELIABLE | USERMSG_BLOCKHOOKS));
 	pb.SetInt("msg_dst", 4);
 	pb.AddString("params", "#SFUI_ContractKillStart");

@@ -789,6 +789,13 @@ public Action Command_TogglePause(int client, int args)
 			return Plugin_Handled;
 		}
 
+		if((iFlags & CPR_Duck) > 0)
+		{
+			Shavit_PrintToChat(client, "%T", "PauseDuck", client, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
+
+			return Plugin_Handled;
+		}
+
 		GetClientAbsOrigin(client, gF_PauseOrigin[client]);
 		GetClientEyeAngles(client, gF_PauseAngles[client]);
 		GetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", gF_PauseVelocity[client]);
@@ -1182,7 +1189,7 @@ public Action Command_Style(int client, int args)
 	}
 
 	menu.ExitButton = true;
-	menu.Display(client, 300);
+	menu.Display(client, MENU_TIME_FOREVER);
 
 	return Plugin_Handled;
 }
@@ -1579,6 +1586,32 @@ public int Native_CanPause(Handle handler, int numParams)
 	if (vel[0] != 0.0 || vel[1] != 0.0 || vel[2] != 0.0)
 	{
 		iFlags |= CPR_Moving;
+	}
+
+
+	float CS_PLAYER_DUCK_SPEED_IDEAL = 8.0;
+	bool bDucked, bDucking;
+	float fDucktime, fDuckSpeed = CS_PLAYER_DUCK_SPEED_IDEAL;
+
+	if(gEV_Type != Engine_TF2)
+	{
+		bDucked = view_as<bool>(GetEntProp(client, Prop_Send, "m_bDucked"));
+		bDucking = view_as<bool>(GetEntProp(client, Prop_Send, "m_bDucking"));
+
+		if(gEV_Type == Engine_CSS)
+		{
+			fDucktime = GetEntPropFloat(client, Prop_Send, "m_flDucktime");
+		}
+		else if(gEV_Type == Engine_CSGO)
+		{
+			fDucktime = GetEntPropFloat(client, Prop_Send, "m_flDuckAmount");
+			fDuckSpeed = GetEntPropFloat(client, Prop_Send, "m_flDuckSpeed");
+		}
+	}
+
+	if (bDucked || bDucking || fDucktime > 0.0 || fDuckSpeed < CS_PLAYER_DUCK_SPEED_IDEAL || GetClientButtons(client) & IN_DUCK)
+	{
+		iFlags |= CPR_Duck;
 	}
 
 	return iFlags;
@@ -2051,7 +2084,7 @@ public int Native_LoadSnapshot(Handle handler, int numParams)
 	// no longer paused, reset their movement
 	if(gA_Timers[client].bPaused && !snapshot.bClientPaused)
 	{
-		SetEntityMoveType(client, MOVETYPE_WALK);
+		//SetEntityMoveType(client, MOVETYPE_WALK);
 	}
 
 	gA_Timers[client].bEnabled = snapshot.bTimerEnabled;
@@ -2320,7 +2353,7 @@ void StartTimer(int client, int track)
 		{
 			if(gA_Timers[client].bPaused)
 			{
-				SetEntityMoveType(client, MOVETYPE_WALK);
+				//SetEntityMoveType(client, MOVETYPE_WALK);
 			}
 
 			gA_Timers[client].iZoneIncrement = 0;
@@ -2379,7 +2412,7 @@ void StopTimer(int client)
 
 	if(gA_Timers[client].bPaused)
 	{
-		SetEntityMoveType(client, MOVETYPE_WALK);
+		//SetEntityMoveType(client, MOVETYPE_WALK);
 	}
 
 	gA_Timers[client].bEnabled = false;
@@ -2420,7 +2453,7 @@ void ResumeTimer(int client)
 
 	gA_Timers[client].bPaused = false;
 	// setting is handled in usercmd
-	SetEntityMoveType(client, MOVETYPE_WALK);
+	//SetEntityMoveType(client, MOVETYPE_WALK);
 }
 
 public void OnClientDisconnect(int client)
@@ -2995,6 +3028,7 @@ void ApplyMigration(int migration)
 		case Migration_PlayertimesDateToInt: ApplyMigration_PlayertimesDateToInt();
 		case Migration_AddZonesFlagsAndData: ApplyMigration_AddZonesFlagsAndData();
 		case Migration_AddPlayertimesCompletions: ApplyMigration_AddPlayertimesCompletions();
+		case Migration_AddCustomChatAccess: ApplyMigration_AddCustomChatAccess();
 	}
 }
 
@@ -3031,6 +3065,13 @@ void ApplyMigration_AddPlayertimesCompletions()
 	char sQuery[192];
 	FormatEx(sQuery, 192, "ALTER TABLE `%splayertimes` ADD COLUMN `completions` SMALLINT DEFAULT 1 AFTER `perfs`;", gS_MySQLPrefix);
 	gH_SQL.Query(SQL_TableMigrationSingleQuery_Callback, sQuery, Migration_AddPlayertimesCompletions, DBPrio_High);
+}
+
+void ApplyMigration_AddCustomChatAccess()
+{
+	char sQuery[192];
+	FormatEx(sQuery, 192, "ALTER TABLE `%schat` ADD COLUMN `ccaccess` INT NOT NULL DEFAULT 0 AFTER `ccmessage`;", gS_MySQLPrefix);
+	gH_SQL.Query(SQL_TableMigrationSingleQuery_Callback, sQuery, Migration_AddCustomChatAccess, DBPrio_High);
 }
 
 public void SQL_TableMigrationSingleQuery_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -3574,7 +3615,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 
 		SetEntityFlags(client, (flags | FL_ATCONTROLS));
 
-		SetEntityMoveType(client, MOVETYPE_NONE);
+		//SetEntityMoveType(client, MOVETYPE_NONE);
 
 		return Plugin_Changed;
 	}
@@ -3839,6 +3880,11 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	if(bOnGround && !gA_Timers[client].bOnGround)
 	{
 		gA_Timers[client].iLandingTick = tickcount;
+
+		if(gEV_Type != Engine_TF2 && GetStyleSettingBool(gA_Timers[client].iStyle, "easybhop"))
+		{
+			SetEntPropFloat(client, Prop_Send, "m_flStamina", 0.0);
+		}
 	}
 
 	else if(!bOnGround && gA_Timers[client].bOnGround && gA_Timers[client].bJumped)
