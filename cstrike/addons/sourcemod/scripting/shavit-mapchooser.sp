@@ -121,7 +121,7 @@ public void OnPluginStart()
 	g_aOldMaps = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
 	g_aTierMenus = new ArrayList(ByteCountToCells(PLATFORM_MAX_PATH));
 	
-	g_cvMapListType = CreateConVar("smc_maplist_type", "1", "Where the plugin should get the map list from. 0 = zoned maps from database, 1 = from maplist file (mapcycle.txt), 2 = from maps folder, 3 = from zoned maps and confirmed by maplist file", _, true, 0.0, true, 3.0);
+	g_cvMapListType = CreateConVar("smc_maplist_type", "0", "Where the plugin should get the map list from. 0 = zoned maps from database, 1 = from maplist file (mapcycle.txt), 2 = from maps folder, 3 = from zoned maps and confirmed by maplist file", _, true, 0.0, true, 3.0);
 	g_cvMatchFuzzyMap = CreateConVar("smc_match_fuzzy", "1", "If set to 1, the plugin will accept partial map matches from the database. Useful for workshop maps, bad for duplicate map names", _, true, 0.0, true, 1.0);
 	
 	g_cvMapVoteBlockMapInterval = CreateConVar("smc_mapvote_blockmap_interval", "1", "How many maps should be played before a map can be nominated again", _, true, 0.0, false);
@@ -134,7 +134,7 @@ public void OnPluginStart()
 	
 	g_cvRTVAllowSpectators = CreateConVar("smc_rtv_allow_spectators", "1", "Whether spectators should be allowed to RTV", _, true, 0.0, true, 1.0);
 	g_cvRTVMinimumPoints = CreateConVar("smc_rtv_minimum_points", "-1", "Minimum number of points a player must have before being able to RTV, or -1 to allow everyone", _, true, -1.0, false);
-	g_cvRTVDelayTime = CreateConVar("smc_rtv_delay", "5", "Time in minutes after map start before players should be allowed to RTV", _, true, 0.0, false);
+	g_cvRTVDelayTime = CreateConVar("smc_rtv_delay", "0", "Time in minutes after map start before players should be allowed to RTV", _, true, 0.0, false);
 	g_cvRTVRequiredPercentage = CreateConVar("smc_rtv_required_percentage", "50", "Percentage of players who have RTVed before a map vote is initiated", _, true, 1.0, true, 100.0);
 
 	g_cvMapVoteRunOff = CreateConVar("smc_mapvote_runoff", "1", "Hold run of votes if winning choice is less than a certain margin", _, true, 0.0, true, 1.0);
