@@ -282,10 +282,10 @@ Action SetupMove(int client, int buttons, int mousedx, float yaw, float forwardm
 		InvalidMoveTrigger(client, DESC3, buttons, forwardmove, sidemove);
 	}
 
-	else if(!DoButtonsMatchUp(buttons, forwardmove, sidemove))
-	{
-		InvalidMoveTrigger(client, DESC5, buttons, forwardmove, sidemove);
-	}
+	// else if(!DoButtonsMatchUp(buttons, forwardmove, sidemove))
+	// {
+	// 	InvalidMoveTrigger(client, DESC5, buttons, forwardmove, sidemove);
+	// }
 
 	return Plugin_Continue;
 }
