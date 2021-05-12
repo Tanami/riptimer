@@ -26,6 +26,7 @@
 #define SHAVIT_VERSION "2.7.0"
 #define STYLE_LIMIT 256
 #define MAX_ZONES 64
+#define MAX_STAGES 51 // 😐 kind of arbitrary but also some space between this and MAX_ZONES
 
 // HUD
 #define HUD_NONE				0
@@ -389,13 +390,14 @@ stock void FormatSeconds(float time, char[] newtime, int newtimesize, bool preci
 	}
 
 	int iRounded = RoundToFloor(fTempTime);
-	float fSeconds = (iRounded % 60) + fTempTime - iRounded;
+	int iSeconds = (iRounded % 60);
+	float fSeconds = iSeconds + fTempTime - iRounded;
 
 	char sSeconds[8];
 
 	if (nodecimal)
 	{
-		FormatEx(sSeconds, 8, "%d", iRounded % 60);
+		FormatEx(sSeconds, 8, "%d", iSeconds);
 	}
 	else
 	{
@@ -407,7 +409,6 @@ stock void FormatSeconds(float time, char[] newtime, int newtimesize, bool preci
 		strcopy(newtime, newtimesize, sSeconds);
 		FormatEx(newtime, newtimesize, "%s%s", (time < 0.0) ? "-":"", sSeconds);
 	}
-
 	else
 	{
 		int iMinutes = (iRounded / 60);
@@ -416,11 +417,10 @@ stock void FormatSeconds(float time, char[] newtime, int newtimesize, bool preci
 		{
 			FormatEx(newtime, newtimesize, "%s%d:%s%s", (time < 0.0)? "-":"", iMinutes, (fSeconds < 10)? "0":"", sSeconds);
 		}
-
 		else
 		{
+			int iHours = (iMinutes / 60);
 			iMinutes %= 60;
-			int iHours = (iRounded / 3600);
 
 			FormatEx(newtime, newtimesize, "%s%d:%s%d:%s%s", (time < 0.0)? "-":"", iHours, (iMinutes < 10)? "0":"", iMinutes, (fSeconds < 10)? "0":"", sSeconds);
 		}
@@ -723,9 +723,10 @@ forward void Shavit_OnDatabaseLoaded();
 /**
  * Called when the chat messages configuration finishes loading and it's ready to load everything into the cache.
  *
+ * @param strings                   The chat strings
  * @noreturn
  */
-forward void Shavit_OnChatConfigLoaded();
+forward void Shavit_OnChatConfigLoaded(chatstrings_t strings);
 
 /**
  * Called when a player teleports with checkpoints.
@@ -1177,10 +1178,51 @@ native TimerStatus Shavit_GetTimerStatus(int client);
  * Retrieve the zone ID for a given stage number.
  * Will return exception if stagenumber doesn't have a zone.
  *
- * @param client					Stage number.
+ * @param stage                     Stage number.
+ * @param track                     Track number.
  * @return                          Zone ID of stage.
  */
-native int Shavit_GetStageZone(int stage);
+native int Shavit_GetStageZone(int stage, int track=Track_Main);
+
+/**
+ * Retrieve the highest stage number for a given track.
+ *
+ * @param track						Track number.
+ * @return 							Number of stages.
+ */
+native int Shavit_GetHighestStage(int track);
+
+/**
+ * Retrieve the client's current stage number.
+ *
+ * @param client                    Client index.
+ * @return                          The client's current stage number.
+ */
+native int Shavit_GetClientLastStage(int client);
+
+/**
+ * Retrieve the WR's stage time.
+ *
+ * @param track                     Track index.
+ * @param style                     Style index.
+ * @param stage                     Stage number.
+ * @return                          The stage time of the WR run. Can be 0.0 if the WR run didn't hit the stage or if the stage doesn't exist.
+ */
+native float Shavit_GetStageWR(int track, int style, int stage);
+
+/**
+ * Retrieve the client's PB stage time.
+ *
+ * @param client                    Client index.
+ * @param track                     Track index.
+ * @param style                     Style index.
+ * @param stage                     Stage number.
+ * @return                          The stage time of the PB run. Can be 0.0 if the PB run didn't hit the stage or if the stage doesn't exist.
+ */
+native float Shavit_GetStagePB(int client, int track, int style, int stage);
+
+//native float Shavit_GetStageWRCP(int track, int style, int stage);
+//native float Shavit_GetStagePBCP(int client, int track, int style, int stage);
 
 /**
  * Retrieve the amount of strafes done since the timer started.
@@ -1705,7 +1747,7 @@ native bool Shavit_HasStyleSetting(int style, const char[] key);
  * @param value						Value to set the style key to.
  * @param replace					Should the value be set if the given key already exists.
  *
- * @return 							True on success, false on failure. .
+ * @return 							True on success, false on failure.
  */
 native bool Shavit_SetStyleSettingFloat(int style, const char[] key, float value, bool replace = true);
 
@@ -1717,7 +1759,7 @@ native bool Shavit_SetStyleSettingFloat(int style, const char[] key, float value
  * @param value						Value to set the style key to.
  * @param replace					Should the value be set if the given key already exists.
  *
- * @return 							True on success, false on failure. .
+ * @return 							True on success, false on failure.
  */
 native bool Shavit_SetStyleSettingBool(int style, const char[] key, bool value, bool replace = true);
 
@@ -1729,7 +1771,7 @@ native bool Shavit_SetStyleSettingBool(int style, const char[] key, bool value, 
  * @param value						Value to set the style key to.
  * @param replace					Should the value be set if the given key already exists.
  *
- * @return 							True on success, false on failure. .
+ * @return 							True on success, false on failure.
  */
 native bool Shavit_SetStyleSettingInt(int style, const char[] key, int value, bool replace = true);
 
@@ -1743,6 +1785,16 @@ native bool Shavit_SetStyleSettingInt(int style, const char[] key, int value, bo
  * @return							SP_ERROR_NONE on success, anything else on failure.
  */
 native int Shavit_GetStyleStrings(int style, int stringtype, char[] StyleStrings, int size);
+
+/**
+ * Saves the style related strings on string references.
+ *
+ * @param style                     Style index.
+ * @param strings                   Reference to a stylestrings_t.
+ * @param size                      Max length for the buffer.
+ * @return                          SP_ERROR_NONE on success, anything else on failure.
+ */
+native int Shavit_GetStyleStringsStruct(int style, any[] strings, int size = sizeof(stylestrings_t));
 
 /**
  * Retrieves the amount of styles in the server.
@@ -1769,6 +1821,15 @@ native void Shavit_GetOrderedStyles(int[] arr, int size);
  * @return							SP_ERROR_NONE on success, anything else on failure.
  */
 native int Shavit_GetChatStrings(int stringtype, char[] ChatStrings, int size);
+
+/**
+ * Saves chat related strings on string references.
+ *
+ * @param strings                   Reference to a chatstrings_t.
+ * @param size                      Size of chatstrings_t.
+ * @return                          SP_ERROR_NONE on success, anything else on failure.
+ */
+native int Shavit_GetChatStringsStruct(any[] strings, int size = sizeof(chatstrings_t));
 
 /**
  * Gets the HUD settings of a player.
@@ -1953,7 +2014,6 @@ native float Shavit_GetClosestReplayVelocityDifference(int client, bool threeD);
 /**
  * Use this native to stop the click sound that plays upon chat messages.
  * Call it before each Shavit_PrintToChat().
- * Shavit_PrintToChatAll() is not guaranteed to disable the sound from playing.
  *
  * @noreturn
  */
@@ -2027,6 +2087,16 @@ native int Shavit_CanPause(int client);
  * @return							PrintToChat()
  */
 native int Shavit_PrintToChat(int client, const char[] format, any ...);
+
+/**
+ * Use this native when printing anything in chat if it's related to the timer.
+ * This native will auto-assign colors and a chat prefix.
+ *
+ * @param format					Formatting rules.
+ * @param any						Variable number of format parameters.
+ * @noreturn
+ */
+native void Shavit_PrintToChatAll(const char[] format, any ...);
 
 /**
  * Logs an entry to bhoptimer's log file.
@@ -2266,23 +2336,6 @@ native void Shavit_GetPlainChatrank(int client, char[] buf, int buflen, bool inc
  */
 native void Shavit_DeleteWR(int style, int track, const char[] map, int accountid, int recordid, bool delete_sql, bool update_cache);
 
-// same as Shavit_PrintToChat() but loops through the whole server
-// code stolen from the base halflife.inc file
-stock void Shavit_PrintToChatAll(const char[] format, any ...)
-{
-	char buffer[300];
-
-	for(int i = 1; i <= MaxClients; i++)
-	{
-		if(IsClientInGame(i))
-		{
-			SetGlobalTransTarget(i);
-			VFormat(buffer, 300, format, 2);
-			Shavit_PrintToChat(i, "%s", buffer);
-		}
-	}
-}
-
 public SharedPlugin __pl_shavit =
 {
 	name = "shavit",
@@ -2307,6 +2360,7 @@ public void __pl_shavit_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_FormatChat");
 	MarkNativeAsOptional("Shavit_GetBhopStyle");
 	MarkNativeAsOptional("Shavit_GetChatStrings");
+	MarkNativeAsOptional("Shavit_GetChatStringsStruct");
 	MarkNativeAsOptional("Shavit_GetClientCompletions");
 	MarkNativeAsOptional("Shavit_GetClientJumps");
 	MarkNativeAsOptional("Shavit_GetClientPB");
@@ -2339,6 +2393,7 @@ public void __pl_shavit_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_GetReplayStatus");
 	MarkNativeAsOptional("Shavit_GetReplayTime");
 	MarkNativeAsOptional("Shavit_GetStageZone");
+	MarkNativeAsOptional("Shavit_GetStageCount");
 	MarkNativeAsOptional("Shavit_GetStrafeCount");
 	MarkNativeAsOptional("Shavit_GetStyleCount");
 	MarkNativeAsOptional("Shavit_GetStyleSetting");
@@ -2346,6 +2401,7 @@ public void __pl_shavit_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_GetStyleSettingFloat");
 	MarkNativeAsOptional("Shavit_HasStyleSetting");
 	MarkNativeAsOptional("Shavit_GetStyleStrings");
+	MarkNativeAsOptional("Shavit_GetStyleStringsStruct");
 	MarkNativeAsOptional("Shavit_GetSync");
 	MarkNativeAsOptional("Shavit_GetTimeOffset");
 	MarkNativeAsOptional("Shavit_GetDistanceOffset");
@@ -2373,6 +2429,7 @@ public void __pl_shavit_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_OpenStatsMenu");
 	MarkNativeAsOptional("Shavit_PauseTimer");
 	MarkNativeAsOptional("Shavit_PrintToChat");
+	MarkNativeAsOptional("Shavit_PrintToChatAll");
 	MarkNativeAsOptional("Shavit_Rankings_DeleteMap");
 	MarkNativeAsOptional("Shavit_ReloadLeaderboards");
 	MarkNativeAsOptional("Shavit_ReloadReplay");
@@ -2423,5 +2480,8 @@ public void __pl_shavit_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_GetReplayBotFrameCount");
 	MarkNativeAsOptional("Shavit_StartReplayFromFrameCache");
 	MarkNativeAsOptional("Shavit_StartReplayFromFile");
+	MarkNativeAsOptional("Shavit_GetClientLastStage");
+	MarkNativeAsOptional("Shavit_GetStageWR");
+	MarkNativeAsOptional("Shavit_GetStagePB");
 }
 #endif

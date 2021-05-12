@@ -35,6 +35,8 @@
 
 #define DEBUG 0
 
+#define EFL_CHECK_UNTOUCH (1<<24)
+
 enum struct playertimer_t
 {
 	bool bEnabled;
@@ -73,8 +75,9 @@ enum struct playertimer_t
 EngineVersion gEV_Type = Engine_Unknown;
 bool gB_Protobuf = false;
 
-// used for hooking player_speedmod's AcceptInput
-DynamicHook gH_AcceptInput;
+// hook stuff
+DynamicHook gH_AcceptInput; // used for hooking player_speedmod's AcceptInput
+Handle gH_PhysicsCheckForEntityUntouch;
 
 // database handle
 Database gH_SQL = null;
@@ -143,6 +146,7 @@ Convar gCV_DefaultStyle = null;
 Convar gCV_NoChatSound = null;
 Convar gCV_SimplerLadders = null;
 Convar gCV_UseOffsets = null;
+Convar gCV_TimeInMessages;
 #if DEBUG
 Convar gCV_DebugOffsets = null;
 #endif
@@ -202,6 +206,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_FinishMap", Native_FinishMap);
 	CreateNative("Shavit_GetBhopStyle", Native_GetBhopStyle);
 	CreateNative("Shavit_GetChatStrings", Native_GetChatStrings);
+	CreateNative("Shavit_GetChatStringsStruct", Native_GetChatStringsStruct);
 	CreateNative("Shavit_GetClientJumps", Native_GetClientJumps);
 	CreateNative("Shavit_GetClientTime", Native_GetClientTime);
 	CreateNative("Shavit_GetClientTrack", Native_GetClientTrack);
@@ -216,6 +221,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_GetStyleSettingFloat", Native_GetStyleSettingFloat);
 	CreateNative("Shavit_HasStyleSetting", Native_HasStyleSetting);
 	CreateNative("Shavit_GetStyleStrings", Native_GetStyleStrings);
+	CreateNative("Shavit_GetStyleStringsStruct", Native_GetStyleStringsStruct);
 	CreateNative("Shavit_GetSync", Native_GetSync);
 	CreateNative("Shavit_GetTimeOffset", Native_GetTimeOffset);
 	CreateNative("Shavit_GetDistanceOffset", Native_GetTimeOffsetDistance);
@@ -229,6 +235,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("Shavit_MarkKZMap", Native_MarkKZMap);
 	CreateNative("Shavit_PauseTimer", Native_PauseTimer);
 	CreateNative("Shavit_PrintToChat", Native_PrintToChat);
+	CreateNative("Shavit_PrintToChatAll", Native_PrintToChatAll);
 	CreateNative("Shavit_RestartTimer", Native_RestartTimer);
 	CreateNative("Shavit_ResumeTimer", Native_ResumeTimer);
 	CreateNative("Shavit_SaveSnapshot", Native_SaveSnapshot);
@@ -271,7 +278,7 @@ public void OnPluginStart()
 	gH_Forwards_OnTrackChanged = CreateGlobalForward("Shavit_OnTrackChanged", ET_Event, Param_Cell, Param_Cell, Param_Cell);
 	gH_Forwards_OnStyleConfigLoaded = CreateGlobalForward("Shavit_OnStyleConfigLoaded", ET_Event, Param_Cell);
 	gH_Forwards_OnDatabaseLoaded = CreateGlobalForward("Shavit_OnDatabaseLoaded", ET_Event);
-	gH_Forwards_OnChatConfigLoaded = CreateGlobalForward("Shavit_OnChatConfigLoaded", ET_Event);
+	gH_Forwards_OnChatConfigLoaded = CreateGlobalForward("Shavit_OnChatConfigLoaded", ET_Event, Param_Array);
 	gH_Forwards_OnUserCmdPre = CreateGlobalForward("Shavit_OnUserCmdPre", ET_Event, Param_Cell, Param_CellByRef, Param_CellByRef, Param_Array, Param_Array, Param_Cell, Param_Cell, Param_Cell, Param_Array, Param_Array);
 	gH_Forwards_OnTimerIncrement = CreateGlobalForward("Shavit_OnTimeIncrement", ET_Event, Param_Cell, Param_Array, Param_CellByRef, Param_Array);
 	gH_Forwards_OnTimerIncrementPost = CreateGlobalForward("Shavit_OnTimeIncrementPost", ET_Event, Param_Cell, Param_Cell, Param_Array);
@@ -383,6 +390,7 @@ public void OnPluginStart()
 	gCV_NoChatSound = new Convar("shavit_core_nochatsound", "0", "Disables click sound for chat messages.", 0, true, 0.0, true, 1.0);
 	gCV_SimplerLadders = new Convar("shavit_core_simplerladders", "1", "Allows using all keys on limited styles (such as sideways) after touching ladders\nTouching the ground enables the restriction again.", 0, true, 0.0, true, 1.0);
 	gCV_UseOffsets = new Convar("shavit_core_useoffsets", "1", "Calculates more accurate times by subtracting/adding tick offsets from the time the server uses to register that a player has left or entered a trigger", 0, true, 0.0, true, 1.0);
+	gCV_TimeInMessages = new Convar("shavit_core_timeinmessages", "0", "Whether to prefix SayText2 messages with the time.", 0, true, 0.0, true, 1.0);
 	#if DEBUG
 	gCV_DebugOffsets = new Convar("shavit_core_debugoffsets", "0", "Print offset upon leaving or entering a zone?", 0, true, 0.0, true, 1.0);
 	#endif
@@ -476,6 +484,13 @@ void LoadDHooks()
 	DHookAddParam(processMovementPost, HookParamType_CBaseEntity);
 	DHookAddParam(processMovementPost, HookParamType_ObjectPtr);
 	DHookRaw(processMovementPost, true, IGameMovement);
+
+	StartPrepSDKCall(SDKCall_Entity);
+	if(!PrepSDKCall_SetFromConf(gamedataConf, SDKConf_Signature, "PhysicsCheckForEntityUntouch"))
+	{
+		SetFailState("Failed to get PhysicsCheckForEntityUntouch");
+	}
+	gH_PhysicsCheckForEntityUntouch = EndPrepSDKCall();
 
 	delete CreateInterface;
 	delete gamedataConf;
@@ -1015,21 +1030,9 @@ void DeleteUserData(int client, const int iSteamID)
 
 	if(gB_WR)
 	{
-		if(gB_MySQL)
-		{
-			FormatEx(sQuery, 512,
-				"SELECT p1.id, p1.style, p1.track, p1.map FROM %splayertimes p1 " ...
-					"JOIN (SELECT map, style, track, MIN(time) time FROM %splayertimes GROUP BY map, style, track) p2 " ...
-					"ON p1.style = p2.style AND p1.track = p2.track AND p1.time = p2.time " ...
-					"WHERE p1.auth = %d;",
-				gS_MySQLPrefix, gS_MySQLPrefix, iSteamID);
-		}
-		else
-		{
-			FormatEx(sQuery, 512,
-				"SELECT p.id, p.style, p.track, p.map FROM %splayertimes p JOIN(SELECT style, MIN(time) time, map, track FROM %splayertimes GROUP BY map, style, track) s ON p.style = s.style AND p.time = s.time AND p.map = s.map AND s.track = p.track GROUP BY p.map, p.style, p.track WHERE p.auth = %d;",
-				gS_MySQLPrefix, gS_MySQLPrefix, iSteamID);
-		}
+		FormatEx(sQuery, sizeof(sQuery),
+			"SELECT id, style, track, map FROM %swrs WHERE auth = %d;",
+			gS_MySQLPrefix, iSteamID);
 
 		gH_SQL.Query(SQL_DeleteUserData_GetRecords_Callback, sQuery, hPack, DBPrio_High);
 	}
@@ -1772,18 +1775,46 @@ public int Native_StopChatSound(Handle handler, int numParams)
 	gB_StopChatSound = true;
 }
 
+public int Native_PrintToChatAll(Handle plugin, int numParams)
+{
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsClientInGame(i) && !IsFakeClient(i))
+		{
+			SetGlobalTransTarget(i);
+
+			bool previousStopChatSound = gB_StopChatSound;
+			SemiNative_PrintToChat(i, 1);
+			gB_StopChatSound = previousStopChatSound;
+		}
+	}
+
+	gB_StopChatSound = false;
+}
+
 public int Native_PrintToChat(Handle handler, int numParams)
 {
 	int client = GetNativeCell(1);
+	return SemiNative_PrintToChat(client, 2);
+}
 
-	static int iWritten = 0; // useless?
-
+public int SemiNative_PrintToChat(int client, int formatParam)
+{
+	int iWritten;
 	char sBuffer[256];
 	char sInput[300];
-	FormatNativeString(0, 2, 3, sizeof(sInput), iWritten, sInput);
+	FormatNativeString(0, formatParam, formatParam+1, sizeof(sInput), iWritten, sInput);
+
+	char sTime[50];
+
+	if (gCV_TimeInMessages.BoolValue)
+	{
+		FormatTime(sTime, sizeof(sTime), "%H:%M:%S ");
+	}
+
 	// space before message needed show colors in cs:go
 	// strlen(sBuffer)>252 is when CSS stops printing the messages
-	FormatEx(sBuffer, (gB_Protobuf ? sizeof(sBuffer) : 253), "%s%s %s%s", (gB_Protobuf ? " ":""), gS_ChatStrings.sPrefix, gS_ChatStrings.sText, sInput);
+	FormatEx(sBuffer, (gB_Protobuf ? sizeof(sBuffer) : 253), "%s%s%s %s%s", (gB_Protobuf ? " ":""), sTime, gS_ChatStrings.sPrefix, gS_ChatStrings.sText, sInput);
 
 	if(client == 0)
 	{
@@ -1883,48 +1914,59 @@ public int Native_GetStyleStrings(Handle handler, int numParams)
 		case sStyleName:
 		{
 			gSM_StyleKeys[style].GetString("name", sValue, size);
-
-			return SetNativeString(3, sValue, size);
 		}
 		case sShortName:
 		{
 			gSM_StyleKeys[style].GetString("shortname", sValue, size);
-
-			return SetNativeString(3, sValue, size);
 		}
 		case sHTMLColor:
 		{
 			gSM_StyleKeys[style].GetString("htmlcolor", sValue, size);
-
-			return SetNativeString(3, sValue, size);
 		}
 		case sChangeCommand:
 		{
 			gSM_StyleKeys[style].GetString("command", sValue, size);
-
-			return SetNativeString(3, sValue, size);
 		}
 		case sClanTag:
 		{
 			gSM_StyleKeys[style].GetString("clantag", sValue, size);
-
-			return SetNativeString(3, sValue, size);
 		}
 		case sSpecialString:
 		{
 			gSM_StyleKeys[style].GetString("specialstring", sValue, size);
-
-			return SetNativeString(3, sValue, size);
 		}
 		case sStylePermission:
 		{
 			gSM_StyleKeys[style].GetString("permission", sValue, size);
-
-			return SetNativeString(3, sValue, size);
+		}
+		default:
+		{
+			return -1;
 		}
 	}
 
-	return -1;
+	return SetNativeString(3, sValue, size);
+}
+
+public int Native_GetStyleStringsStruct(Handle plugin, int numParams)
+{
+	int style = GetNativeCell(1);
+
+	if (GetNativeCell(3) != sizeof(stylestrings_t))
+	{
+		return ThrowNativeError(200, "stylestrings_t does not match latest(got %i expected %i). Please update your includes and recompile your plugins", GetNativeCell(3), sizeof(stylestrings_t));
+	}
+
+	stylestrings_t strings;
+	gSM_StyleKeys[style].GetString("name", strings.sStyleName, sizeof(strings.sStyleName));
+	gSM_StyleKeys[style].GetString("shortname", strings.sShortName, sizeof(strings.sShortName));
+	gSM_StyleKeys[style].GetString("htmlcolor", strings.sHTMLColor, sizeof(strings.sHTMLColor));
+	gSM_StyleKeys[style].GetString("command", strings.sChangeCommand, sizeof(strings.sChangeCommand));
+	gSM_StyleKeys[style].GetString("clantag", strings.sClanTag, sizeof(strings.sClanTag));
+	gSM_StyleKeys[style].GetString("specialstring", strings.sSpecialString, sizeof(strings.sSpecialString));
+	gSM_StyleKeys[style].GetString("permission", strings.sStylePermission, sizeof(strings.sStylePermission));
+
+	return SetNativeArray(2, strings, sizeof(stylestrings_t));
 }
 
 public int Native_GetChatStrings(Handle handler, int numParams)
@@ -1943,6 +1985,16 @@ public int Native_GetChatStrings(Handle handler, int numParams)
 	}
 
 	return -1;
+}
+
+public int Native_GetChatStringsStruct(Handle plugin, int numParams)
+{
+	if (GetNativeCell(2) != sizeof(chatstrings_t))
+	{
+		return ThrowNativeError(200, "chatstrings_t does not match latest(got %i expected %i). Please update your includes and recompile your plugins", GetNativeCell(2), sizeof(chatstrings_t));
+	}
+
+	return SetNativeArray(1, gS_ChatStrings, sizeof(gS_ChatStrings));
 }
 
 public int Native_SetPracticeMode(Handle handler, int numParams)
@@ -2814,6 +2866,7 @@ bool LoadMessages()
 	ReplaceColors(gS_ChatStrings.sStyle, sizeof(chatstrings_t::sStyle));
 
 	Call_StartForward(gH_Forwards_OnChatConfigLoaded);
+	Call_PushArray(gS_ChatStrings, sizeof(gS_ChatStrings));
 	Call_Finish();
 
 	return true;
@@ -3324,9 +3377,22 @@ public MRESReturn DHook_AcceptInput_player_speedmod(int pThis, DHookReturn hRetu
 	return MRES_Supercede;
 }
 
+bool GetCheckUntouch(int client)
+{
+	int flags = GetEntProp(client, Prop_Data, "m_iEFlags");
+	return (flags & EFL_CHECK_UNTOUCH) != 0;
+}
+
 public MRESReturn DHook_ProcessMovement(Handle hParams)
 {
 	int client = DHookGetParam(hParams, 1);
+
+	// Causes client to do zone touching in movement instead of server frames.
+	// From https://github.com/rumourA/End-Touch-Fix
+	if(GetCheckUntouch(client))
+	{
+		SDKCall(gH_PhysicsCheckForEntityUntouch, client);
+	}
 
 	Call_StartForward(gH_Forwards_OnProcessMovement);
 	Call_PushCell(client);

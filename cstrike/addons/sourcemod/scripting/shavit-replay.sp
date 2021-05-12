@@ -99,6 +99,7 @@ enum struct bot_info_t
 	float fStartTick; // Shavit_GetReplayBotFirstFrame
 	bool bCustomFrames;
 	bool bIgnoreLimit;
+	bool b2x;
 	framecache_t aCache;
 }
 
@@ -106,6 +107,27 @@ enum
 {
 	iBotShooting_Attack1 = (1 << 0),
 	iBotShooting_Attack2 = (1 << 1)
+}
+
+enum
+{
+	CSS_ANIM_FIRE_GUN_PRIMARY,
+	CSS_ANIM_FIRE_GUN_SECONDARY,
+	CSS_ANIM_THROW_GRENADE,
+	CSS_ANIM_JUMP
+}
+
+enum
+{
+	CSGO_ANIM_FIRE_GUN_PRIMARY,
+	CSGO_ANIM_FIRE_GUN_PRIMARY_OPT,
+	CSGO_ANIM_FIRE_GUN_PRIMARY__SPECIAL,
+	CSGO_ANIM_FIRE_GUN_PRIMARY_OPT_SPECIAL,
+	CSGO_ANIM_FIRE_GUN_SECONDARY,
+	CSGO_ANIM_FIRE_GUN_SECONDARY_SPECIAL,
+	CSGO_ANIM_GRENADE_PULL_PIN,
+	CSGO_ANIM_THROW_GRENADE,
+	CSGO_ANIM_JUMP
 }
 
 // custom cvar settings
@@ -127,6 +149,7 @@ char gS_ForcedCvars[][][] =
 
 // game type
 EngineVersion gEV_Type = Engine_Unknown;
+bool gB_Linux;
 
 // cache
 char gS_ReplayFolder[PLATFORM_MAX_PATH];
@@ -173,10 +196,11 @@ bot_info_t gA_BotInfo[MAXPLAYERS+1];
 
 // hooks and sdkcall stuff
 Handle gH_BotAddCommand = INVALID_HANDLE;
+Handle gH_DoAnimationEvent = INVALID_HANDLE ;
 DynamicDetour gH_MaintainBotQuota = null;
 int gI_WEAPONTYPE_UNKNOWN = 123123123;
 int gI_LatestClient = -1;
-bool gB_BotAddCommand_ThisCall = false;
+int g_iLastReplayFlags[MAXPLAYERS + 1];
 
 // how do i call this
 bool gB_HideNameChange = false;
@@ -312,7 +336,7 @@ public void OnPluginStart()
 	gH_OnReplaysLoaded = CreateGlobalForward("Shavit_OnReplaysLoaded", ET_Event);
 	gH_ShouldSaveReplayCopy = CreateGlobalForward("Shavit_ShouldSaveReplayCopy", ET_Event, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell);
 	gH_OnReplaySaved = CreateGlobalForward("Shavit_OnReplaySaved", ET_Ignore, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_Cell, Param_String);
-
+	
 	// game specific
 	gEV_Type = GetEngineVersion();
 	gF_Tickrate = (1.0 / GetTickInterval());
@@ -413,9 +437,9 @@ void LoadDHooks()
 		SetFailState("Failed to load shavit gamedata");
 	}
 
-	gB_BotAddCommand_ThisCall = view_as<bool>(gamedata.GetOffset("BotAddCommand_ThisCall"));
+	gB_Linux = (gamedata.GetOffset("OS") == 2);
 
-	StartPrepSDKCall(gB_BotAddCommand_ThisCall ? SDKCall_Raw : SDKCall_Static);
+	StartPrepSDKCall(gB_Linux ? SDKCall_Raw : SDKCall_Static);
 
 	if (gEV_Type == Engine_TF2)
 	{
@@ -453,23 +477,43 @@ void LoadDHooks()
 		}
 	}
 
-	Address addr = gamedata.GetAddress("BotManager::MaintainBotQuota");
-	if (!addr)
-	{
-		SetFailState("Failed to get address for BotManager::MaintainBotQuota");
-	}
-
 	if ((gI_WEAPONTYPE_UNKNOWN = gamedata.GetOffset("WEAPONTYPE_UNKNOWN")) == -1)
 	{
 		SetFailState("Failed to get WEAPONTYPE_UNKNOWN");
 	}
 
-	if (!(gH_MaintainBotQuota = DHookCreateDetour(addr, CallConv_THISCALL, ReturnType_Void, ThisPointer_Address)))
+	if (!(gH_MaintainBotQuota = DHookCreateDetour(Address_Null, CallConv_THISCALL, ReturnType_Void, ThisPointer_Address)))
 	{
 		SetFailState("Failed to create detour for BotManager::MaintainBotQuota");
 	}
 
+	if (!DHookSetFromConf(gH_MaintainBotQuota, gamedata, SDKConf_Signature, "BotManager::MaintainBotQuota"))
+	{
+		SetFailState("Failed to get address for BotManager::MaintainBotQuota");
+	}
+
 	gH_MaintainBotQuota.Enable(Hook_Pre, Detour_MaintainBotQuota);
+	
+	if(gB_Linux)
+	{
+		StartPrepSDKCall(SDKCall_Static);
+	}
+	else
+	{
+		StartPrepSDKCall(SDKCall_Player);
+	}
+
+	if (PrepSDKCall_SetFromConf(gamedata, SDKConf_Signature, "DoAnimationEvent"))
+	{
+		if(gB_Linux)
+		{
+			PrepSDKCall_AddParameter(SDKType_CBasePlayer, SDKPass_ByRef);
+		}
+		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_ByValue);
+		PrepSDKCall_AddParameter(SDKType_PlainOldData, SDKPass_ByValue);
+	}
+
+	gH_DoAnimationEvent = EndPrepSDKCall();
 
 	delete gamedata;
 }
@@ -1401,7 +1445,9 @@ public void OnMapStart()
 	if(gB_Late)
 	{
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
-		Shavit_OnChatConfigLoaded();
+		chatstrings_t chatstrings;
+		Shavit_GetChatStringsStruct(chatstrings);
+		Shavit_OnChatConfigLoaded(chatstrings);
 	}
 
 	GetCurrentMap(gS_Map, 160);
@@ -1478,22 +1524,15 @@ public void Shavit_OnStyleConfigLoaded(int styles)
 {
 	for(int i = 0; i < styles; i++)
 	{
-		Shavit_GetStyleStrings(i, sClanTag, gS_StyleStrings[i].sClanTag, sizeof(stylestrings_t::sClanTag));
-		Shavit_GetStyleStrings(i, sStyleName, gS_StyleStrings[i].sStyleName, sizeof(stylestrings_t::sStyleName));
-		Shavit_GetStyleStrings(i, sShortName, gS_StyleStrings[i].sShortName, sizeof(stylestrings_t::sShortName));
+		Shavit_GetStyleStringsStruct(i, gS_StyleStrings[i]);
 	}
 
 	gI_Styles = styles;
 }
 
-public void Shavit_OnChatConfigLoaded()
+public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
 {
-	Shavit_GetChatStrings(sMessagePrefix, gS_ChatStrings.sPrefix, sizeof(chatstrings_t::sPrefix));
-	Shavit_GetChatStrings(sMessageText, gS_ChatStrings.sText, sizeof(chatstrings_t::sText));
-	Shavit_GetChatStrings(sMessageWarning, gS_ChatStrings.sWarning, sizeof(chatstrings_t::sWarning));
-	Shavit_GetChatStrings(sMessageVariable, gS_ChatStrings.sVariable, sizeof(chatstrings_t::sVariable));
-	Shavit_GetChatStrings(sMessageVariable2, gS_ChatStrings.sVariable2, sizeof(chatstrings_t::sVariable2));
-	Shavit_GetChatStrings(sMessageStyle, gS_ChatStrings.sStyle, sizeof(chatstrings_t::sStyle));
+	gS_ChatStrings = strings;
 }
 
 public void Shavit_OnStyleChanged(int client, int oldstyle, int newstyle, int track, bool manual)
@@ -1515,7 +1554,7 @@ int InternalCreateReplayBot()
 	}
 	else
 	{
-		if (gB_BotAddCommand_ThisCall)
+		if (gB_Linux)
 		{
 			/*int ret =*/ SDKCall(
 				gH_BotAddCommand,
@@ -2493,7 +2532,7 @@ public void Shavit_OnTimescaleChanged(int client, float oldtimescale, float newt
 	gF_NextFrameTime[client] = 0.0;
 }
 
-Action ReplayRunCmd(bot_info_t info, int &buttons, int &impulse, float vel[3])
+Action ReplayOnPlayerRunCmd(bot_info_t info, int &buttons, int &impulse, float vel[3])
 {
 	float vecCurrentPosition[3];
 	GetEntPropVector(info.iEnt, Prop_Send, "m_vecOrigin", vecCurrentPosition);
@@ -2536,7 +2575,9 @@ Action ReplayRunCmd(bot_info_t info, int &buttons, int &impulse, float vel[3])
 				return Plugin_Changed;
 			}
 
-			if(++info.iTick >= info.aCache.iFrameCount - 1)
+			info.iTick += info.b2x ? 2 : 1;
+
+			if(info.iTick >= info.aCache.iFrameCount - 1)
 			{
 				info.iStatus = Replay_End;
 				info.hTimer = CreateTimer((gCV_ReplayDelay.FloatValue / 2.0), Timer_EndReplay, info.iEnt, TIMER_FLAG_NO_MAPCHANGE);
@@ -2547,6 +2588,20 @@ Action ReplayRunCmd(bot_info_t info, int &buttons, int &impulse, float vel[3])
 			if(info.iTick == 1)
 			{
 				info.fStartTick = GetEngineTime();
+			}
+
+			float vecPreviousPos[3];
+
+			if (info.b2x)
+			{
+				frame_t aFramePrevious;
+				int previousTick = (info.iTick > 0) ? (info.iTick-1) : 0;
+				info.aCache.aFrames.GetArray(previousTick, aFramePrevious, (info.aCache.iReplayVersion >= 0x02) ? 8 : 6);
+				vecPreviousPos = aFramePrevious.pos;
+			}
+			else
+			{
+				vecPreviousPos = vecCurrentPosition;
 			}
 
 			frame_t aFrame;
@@ -2585,6 +2640,21 @@ Action ReplayRunCmd(bot_info_t info, int &buttons, int &impulse, float vel[3])
 					ApplyFlags(iEntityFlags, iReplayFlags, FL_SWIM);
 
 					SetEntityFlags(info.iEnt, iEntityFlags);
+					
+					if((g_iLastReplayFlags[info.iEnt] & FL_ONGROUND) && !(iReplayFlags & FL_ONGROUND) && gH_DoAnimationEvent != INVALID_HANDLE)
+					{
+						int jumpAnim = GetEngineVersion() == Engine_CSS ? CSS_ANIM_JUMP:CSGO_ANIM_JUMP;
+						
+						if(gB_Linux)
+						{
+							SDKCall(gH_DoAnimationEvent, EntIndexToEntRef(info.iEnt), jumpAnim, 0);
+						}
+						else
+						{
+							SDKCall(gH_DoAnimationEvent, info.iEnt, jumpAnim, 0);
+						}
+					}
+					
 				}
 
 				if(aFrame.mt == MOVETYPE_LADDER)
@@ -2599,25 +2669,26 @@ Action ReplayRunCmd(bot_info_t info, int &buttons, int &impulse, float vel[3])
 
 			if (isClient)
 			{
+				g_iLastReplayFlags[info.iEnt] = aFrame.flags; 
 				SetEntityMoveType(info.iEnt, mt);
 			}
 
 			float vecVelocity[3];
-			MakeVectorFromPoints(vecCurrentPosition, aFrame.pos, vecVelocity);
+			MakeVectorFromPoints(vecPreviousPos, aFrame.pos, vecVelocity);
 			ScaleVector(vecVelocity, gF_Tickrate);
 
 			float ang[3];
 			ang[0] = aFrame.ang[0];
 			ang[1] = aFrame.ang[1];
 
-			if(info.iTick > 1 &&
+			if(info.b2x || (info.iTick > 1 &&
 				// replay is going above 50k speed, just teleport at this point
 				(GetVectorLength(vecVelocity) > 50000.0 ||
 				// bot is on ground.. if the distance between the previous position is much bigger (1.5x) than the expected according
 				// to the bot's velocity, teleport to avoid sync issues
-				(bWalk && GetVectorDistance(vecCurrentPosition, aFrame.pos) > GetVectorLength(vecVelocity) / gF_Tickrate * 1.5)))
+				(bWalk && GetVectorDistance(vecPreviousPos, aFrame.pos) > GetVectorLength(vecVelocity) / gF_Tickrate * 1.5))))
 			{
-				TeleportEntity(info.iEnt, aFrame.pos, ang, NULL_VECTOR);
+				TeleportEntity(info.iEnt, aFrame.pos, ang, info.b2x ? vecVelocity : NULL_VECTOR);
 			}
 			else
 			{
@@ -2643,7 +2714,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		{
 			if(!gB_Button[client] && GetSpectatorTarget(client) != -1)
 			{
-				OpenReplayTypeMenu(client);
+				OpenReplayMenu(client);
 			}
 
 			gB_Button[client] = true;
@@ -2660,7 +2731,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	{
 		if (gA_BotInfo[client].iEnt == client)
 		{
-			return ReplayRunCmd(gA_BotInfo[client], buttons, impulse, vel);
+			return ReplayOnPlayerRunCmd(gA_BotInfo[client], buttons, impulse, vel);
 		}
 	}
 	else if(ReplayEnabled(Shavit_GetBhopStyle(client)) && Shavit_GetTimerStatus(client) == Timer_Running)
@@ -3094,8 +3165,112 @@ public Action Command_Replay(int client, int args)
 		}
 	}
 
-	OpenReplayTypeMenu(client);
+	OpenReplayMenu(client);
 	return Plugin_Handled;
+}
+
+void OpenReplayMenu(int client)
+{
+	Menu menu = new Menu(MenuHandler_Replay);
+	menu.SetTitle("%T\n ", "Menu_Replay", client);
+
+	char sDisplay[64];
+	bool alreadyHaveBot = (gA_BotInfo[client].iEnt > 0);
+	int index = GetControllableReplay(client);
+	bool canControlReplay = (index != -1);
+
+	FormatEx(sDisplay, 64, "%T", "CentralReplayStop", client);
+	menu.AddItem("stop", sDisplay, canControlReplay ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
+
+	FormatEx(sDisplay, 64, "%T", "Menu_SpawnReplay", client);
+	menu.AddItem("spawn", sDisplay, !(alreadyHaveBot) ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
+
+	FormatEx(sDisplay, 64, "+1s");
+	menu.AddItem("+1", sDisplay, canControlReplay ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
+
+	FormatEx(sDisplay, 64, "-1s");
+	menu.AddItem("-1", sDisplay, canControlReplay ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
+
+	FormatEx(sDisplay, 64, "+10s");
+	menu.AddItem("+10", sDisplay, canControlReplay ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
+
+	FormatEx(sDisplay, 64, "-10s");
+	menu.AddItem("-10", sDisplay, canControlReplay ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
+
+	FormatEx(sDisplay, 64, "%T", "Menu_Replay2X", client, (index != -1 && gA_BotInfo[index].b2x) ? "+" : "_");
+	menu.AddItem("2x", sDisplay, canControlReplay ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
+
+	FormatEx(sDisplay, 64, "%T", "Menu_RefreshReplay", client);
+	menu.AddItem("refresh", sDisplay, ITEMDRAW_DEFAULT);
+
+	menu.Pagination = MENU_NO_PAGINATION;
+	menu.ExitButton = true;
+	menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
+}
+
+public int MenuHandler_Replay(Menu menu, MenuAction action, int param1, int param2)
+{
+	if(action == MenuAction_Select)
+	{
+		char sInfo[16];
+		menu.GetItem(param2, sInfo, 16);
+
+		if (StrEqual(sInfo, "stop"))
+		{
+			int index = GetControllableReplay(param1);
+
+			if (index != -1)
+			{
+				Shavit_PrintToChat(param1, "%T", "CentralReplayStopped", param1);
+				FinishReplay(gA_BotInfo[index]);
+			}
+
+			OpenReplayMenu(param1);
+		}
+		else if (StrEqual(sInfo, "spawn"))
+		{
+			OpenReplayTypeMenu(param1);
+		}
+		else if (StrEqual(sInfo, "2x"))
+		{
+			int index = GetControllableReplay(param1);
+
+			if (index != -1)
+			{
+				gA_BotInfo[index].b2x = !gA_BotInfo[index].b2x;
+			}
+
+			OpenReplayMenu(param1);
+		}
+		else if (StrEqual(sInfo, "refresh"))
+		{
+			OpenReplayMenu(param1);
+		}
+		else if (sInfo[0] == '-' || sInfo[0] == '+')
+		{
+			int seconds = StringToInt(sInfo);
+
+			int index = GetControllableReplay(param1);
+
+			if (index != -1)
+			{
+				gA_BotInfo[index].iTick += RoundToFloor(seconds * gF_Tickrate);
+
+				if (gA_BotInfo[index].iTick < 0)
+				{
+					gA_BotInfo[index].iTick = 0;
+				}
+			}
+
+			OpenReplayMenu(param1);
+		}
+	}
+	else if(action == MenuAction_End)
+	{
+		delete menu;
+	}
+
+	return 0;
 }
 
 void OpenReplayTypeMenu(int client)
@@ -3119,23 +3294,7 @@ void OpenReplayTypeMenu(int client)
 	IntToString(Replay_Prop, sInfo, sizeof(sInfo));
 	menu.AddItem(sInfo, sDisplay, (gCV_AllowPropBots.BoolValue && !alreadyHaveBot) ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 
-	bool canstop = false;
-	int target = GetSpectatorTarget(client);
-
-	if (target != -1)
-	{
-		int index = GetBotInfoIndex(target);
-
-		if (gA_BotInfo[index].iStatus == Replay_Start || gA_BotInfo[index].iStatus == Replay_Running)
-		{
-			canstop = CanStopReplay(client, gA_BotInfo[index]);
-		}
-	}
-
-	FormatEx(sDisplay, 64, "%T", "CentralReplayStop", client);
-	menu.AddItem("stop", sDisplay, canstop ? ITEMDRAW_DEFAULT:ITEMDRAW_DISABLED);
-
-	menu.ExitButton = true;
+	menu.ExitBackButton = true;
 	menu.DisplayAt(client, 0, MENU_TIME_FOREVER);
 }
 
@@ -3145,24 +3304,6 @@ public int MenuHandler_ReplayType(Menu menu, MenuAction action, int param1, int 
 	{
 		char sInfo[16];
 		menu.GetItem(param2, sInfo, 16);
-
-		if(StrEqual(sInfo, "stop"))
-		{
-			int target = GetSpectatorTarget(param1);
-
-			if (target != -1)
-			{
-				int index = GetBotInfoIndex(target);
-
-				if ((gA_BotInfo[index].iStatus == Replay_Start || gA_BotInfo[index].iStatus == Replay_Running) && CanStopReplay(param1, gA_BotInfo[index]))
-				{
-					Shavit_PrintToChat(param1, "%T", "CentralReplayStopped", param1);
-					FinishReplay(gA_BotInfo[index]);
-				}
-			}
-
-			return 0;
-		}
 
 		int type = StringToInt(sInfo);
 
@@ -3181,6 +3322,10 @@ public int MenuHandler_ReplayType(Menu menu, MenuAction action, int param1, int 
 
 		gI_MenuType[param1] = type;
 		OpenReplayTrackMenu(param1);
+	}
+	else if(action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
+	{
+		OpenReplayMenu(param1);
 	}
 	else if(action == MenuAction_End)
 	{
@@ -3360,6 +3505,8 @@ public int MenuHandler_ReplayStyle(Menu menu, MenuAction action, int param1, int
 			Shavit_PrintToChat(param1, "%T", "FailedToCreateReplay", param1);
 			return 0;
 		}
+
+		OpenReplayMenu(param1);
 	}
 	else if(action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
 	{
@@ -3373,12 +3520,32 @@ public int MenuHandler_ReplayStyle(Menu menu, MenuAction action, int param1, int
 	return 0;
 }
 
-bool CanStopReplay(int client, bot_info_t info)
+bool CanControlReplay(int client, bot_info_t info)
 {
 	return (CheckCommandAccess(client, "sm_deletereplay", ADMFLAG_RCON) ||
 			(gCV_PlaybackCanStop.BoolValue &&
 			GetClientSerial(client) == info.iStarterSerial &&
 			GetEngineTime() - gF_LastInteraction[client] > gCV_PlaybackCooldown.FloatValue));
+}
+
+int GetControllableReplay(int client)
+{
+	int target = GetSpectatorTarget(client);
+
+	if (target != -1)
+	{
+		int index = GetBotInfoIndex(target);
+
+		if (gA_BotInfo[index].iStatus == Replay_Start || gA_BotInfo[index].iStatus == Replay_Running)
+		{
+			if (CanControlReplay(client, gA_BotInfo[index]))
+			{
+				return index;
+			}
+		}
+	}
+
+	return -1;
 }
 
 void TeleportToStart(bot_info_t info)
@@ -3413,6 +3580,7 @@ void ClearBotInfo(bot_info_t info)
 	info.fStartTick = -1.0;
 	info.bCustomFrames = false;
 	//info.bIgnoreLimit
+	info.b2x = false;
 
 	info.aCache.iFrameCount = -1;
 	info.aCache.fTime = -1.0;
@@ -3591,7 +3759,7 @@ public void OnGameFrame()
 		int buttons, impulse;
 		float vel[3];
 
-		ReplayRunCmd(gA_BotInfo[i], buttons, impulse, vel);
+		ReplayOnPlayerRunCmd(gA_BotInfo[i], buttons, impulse, vel);
 
 		/*
 		if (!IsPlayerAlive(i))
