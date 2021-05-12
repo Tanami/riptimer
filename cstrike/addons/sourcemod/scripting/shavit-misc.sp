@@ -130,6 +130,7 @@ Convar gCV_StopTimerWarning = null;
 Convar gCV_WRMessages = null;
 Convar gCV_BhopSounds = null;
 Convar gCV_RestrictNoclip = null;
+Convar gCV_BotFootsteps = null;
 
 // external cvars
 ConVar sv_disable_immunity_alpha = null;
@@ -149,6 +150,7 @@ Handle gH_Forwards_OnCheckpointMenuSelect = null;
 
 // dhooks
 Handle gH_GetPlayerMaxSpeed = null;
+DynamicHook gH_UpdateStepSound = null;
 DynamicHook gH_IsSpawnPointValid = null;
 
 // modules
@@ -289,7 +291,7 @@ public void OnPluginStart()
 	gCV_HideTeamChanges = new Convar("shavit_misc_hideteamchanges", "1", "Hide team changes in chat?\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
 	gCV_RespawnOnTeam = new Convar("shavit_misc_respawnonteam", "1", "Respawn whenever a player joins a team?\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
 	gCV_RespawnOnRestart = new Convar("shavit_misc_respawnonrestart", "1", "Respawn a dead player if they use the timer restart command?\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
-	gCV_StartOnSpawn = new Convar("shavit_misc_startonspawn", "0", "Restart the timer for a player after they spawn?\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
+	gCV_StartOnSpawn = new Convar("shavit_misc_startonspawn", "1", "Restart the timer for a player after they spawn?\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
 	gCV_PrestrafeLimit = new Convar("shavit_misc_prestrafelimit", "30", "Prestrafe limitation in startzone.\nThe value used internally is style run speed + this.\ni.e. run speed of 250 can prestrafe up to 278 (+28) with regular settings.", 0, true, 0.0, false);
 	gCV_HideRadar = new Convar("shavit_misc_hideradar", "1", "Should the plugin hide the in-game radar?", 0, true, 0.0, true, 1.0);
 	gCV_TeleportCommands = new Convar("shavit_misc_tpcmds", "1", "Enable teleport-related commands? (sm_goto/sm_tpto)\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
@@ -319,8 +321,9 @@ public void OnPluginStart()
 	gCV_PersistData = new Convar("shavit_misc_persistdata", "600", "How long to persist timer data for disconnected users in seconds?\n-1 - Until map change\n0 - Disabled");
 	gCV_StopTimerWarning = new Convar("shavit_misc_stoptimerwarning", "180", "Time in seconds to display a warning before stopping the timer with noclip or !stop.\n0 - Disabled");
 	gCV_WRMessages = new Convar("shavit_misc_wrmessages", "3", "How many \"NEW <style> WR!!!\" messages to print?\n0 - Disabled", 0,  true, 0.0, true, 100.0);
-	gCV_BhopSounds = new Convar("shavit_misc_bhopsounds", "0", "Should bhop (landing and jumping) sounds be muted?\n0 - Disabled\n1 - Blocked while !hide is enabled\n2 - Always blocked", 0,  true, 0.0, true, 3.0);
+	gCV_BhopSounds = new Convar("shavit_misc_bhopsounds", "1", "Should bhop (landing and jumping) sounds be muted?\n0 - Disabled\n1 - Blocked while !hide is enabled\n2 - Always blocked", 0,  true, 0.0, true, 2.0);
 	gCV_RestrictNoclip = new Convar("shavit_misc_restrictnoclip", "0", "Should noclip be be restricted\n0 - Disabled\n1 - No vertical velocity while in noclip in start zone\n2 - No noclip in start zone", 0, true, 0.0, true, 2.0);
+	gCV_BotFootsteps = new Convar("shavit_misc_botfootsteps", "1", "Enable footstep sounds for replay bots. Only works if shavit_misc_bhopsounds is less than 2.", 0, true, 0.0, true, 1.0);
 
 	gCV_HideRadar.AddChangeHook(OnConVarChanged);
 	Convar.AutoExecConfig();
@@ -351,6 +354,18 @@ public void OnPluginStart()
 				else
 				{
 					SetFailState("Couldn't get the offset for \"CCSPlayer::GetPlayerMaxSpeed\" - make sure your gamedata is updated!");
+				}
+
+				if ((iOffset = GameConfGetOffset(hGameData, "CBasePlayer::UpdateStepSound")) != -1)
+				{
+					gH_UpdateStepSound = new DynamicHook(iOffset, HookType_Entity, ReturnType_Void, ThisPointer_CBaseEntity);
+					gH_UpdateStepSound.AddParam(HookParamType_ObjectPtr);
+					gH_UpdateStepSound.AddParam(HookParamType_VectorPtr);
+					gH_UpdateStepSound.AddParam(HookParamType_VectorPtr);
+				}
+				else
+				{
+					LogError("Couldn't get the offset for \"CBasePlayer::UpdateStepSound\" - make sure your gamedata is updated!");
 				}
 
 				if ((iOffset = GameConfGetOffset(hGameData, "CGameRules::IsSpawnPointValid")) != -1)
@@ -455,20 +470,13 @@ public void Shavit_OnStyleConfigLoaded(int styles)
 {
 	for(int i = 0; i < styles; i++)
 	{
-		Shavit_GetStyleStrings(i, sStyleName, gS_StyleStrings[i].sStyleName, sizeof(stylestrings_t::sStyleName));
-		Shavit_GetStyleStrings(i, sClanTag, gS_StyleStrings[i].sClanTag, sizeof(stylestrings_t::sClanTag));
-		Shavit_GetStyleStrings(i, sSpecialString, gS_StyleStrings[i].sSpecialString, sizeof(stylestrings_t::sSpecialString));
+		Shavit_GetStyleStringsStruct(i, gS_StyleStrings[i]);
 	}
 }
 
-public void Shavit_OnChatConfigLoaded()
+public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
 {
-	Shavit_GetChatStrings(sMessagePrefix, gS_ChatStrings.sPrefix, sizeof(chatstrings_t::sPrefix));
-	Shavit_GetChatStrings(sMessageText, gS_ChatStrings.sText, sizeof(chatstrings_t::sText));
-	Shavit_GetChatStrings(sMessageWarning, gS_ChatStrings.sWarning, sizeof(chatstrings_t::sWarning));
-	Shavit_GetChatStrings(sMessageVariable, gS_ChatStrings.sVariable, sizeof(chatstrings_t::sVariable));
-	Shavit_GetChatStrings(sMessageVariable2, gS_ChatStrings.sVariable2, sizeof(chatstrings_t::sVariable2));
-	Shavit_GetChatStrings(sMessageStyle, gS_ChatStrings.sStyle, sizeof(chatstrings_t::sStyle));
+	gS_ChatStrings = strings;
 
 	if(!LoadAdvertisementsConfig())
 	{
@@ -577,7 +585,9 @@ public void OnMapStart()
 	if(gB_Late)
 	{
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
-		Shavit_OnChatConfigLoaded();
+		chatstrings_t chatstrings;
+		Shavit_GetChatStringsStruct(chatstrings);
+		Shavit_OnChatConfigLoaded(chatstrings);
 	}
 
 	if(gCV_AdvertisementInterval.FloatValue > 0.0)
@@ -828,16 +838,42 @@ public Action Command_Radio(int client, const char[] command, int args)
 	return Plugin_Continue;
 }
 
-public MRESReturn CCSPlayer__GetPlayerMaxSpeed(int pThis, Handle hReturn)
+public MRESReturn CCSPlayer__GetPlayerMaxSpeed(int pThis, DHookReturn hReturn)
 {
 	if(!gCV_StaticPrestrafe.BoolValue || !IsValidClient(pThis, true))
 	{
 		return MRES_Ignored;
 	}
 
-	DHookSetReturn(hReturn, Shavit_GetStyleSettingFloat(gI_Style[pThis], "runspeed"));
+	hReturn.Value = Shavit_GetStyleSettingFloat(gI_Style[pThis], "runspeed");
 
 	return MRES_Override;
+}
+
+// Remove flags from replay bots that cause CBasePlayer::UpdateStepSound to return without playing a footstep.
+public MRESReturn Hook_UpdateStepSound_Pre(int pThis, DHookParam hParams)
+{
+	if (GetEntityMoveType(pThis) == MOVETYPE_NOCLIP)
+	{
+		SetEntityMoveType(pThis, MOVETYPE_WALK);
+	}
+
+	SetEntityFlags(pThis, GetEntityFlags(pThis) & ~FL_ATCONTROLS);
+
+	return MRES_Ignored;
+}
+
+// Readd flags to replay bots now that CBasePlayer::UpdateStepSound is done.
+public MRESReturn Hook_UpdateStepSound_Post(int pThis, DHookParam hParams)
+{
+	if (GetEntityMoveType(pThis) == MOVETYPE_WALK)
+	{
+		SetEntityMoveType(pThis, MOVETYPE_NOCLIP);
+	}
+
+	SetEntityFlags(pThis, GetEntityFlags(pThis) | FL_ATCONTROLS);
+
+	return MRES_Ignored;
 }
 
 public Action Timer_Cron(Handle timer)
@@ -1090,7 +1126,23 @@ void RemoveRagdoll(int client)
 	}
 }
 
-public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style, stylesettings_t stylesettings)
+public void Shavit_OnPause(int client, int track)
+{
+	if (gB_Eventqueuefix)
+	{
+		SetClientEventsPaused(client, true);
+	}
+}
+
+public void Shavit_OnResume(int client, int track)
+{
+	if (gB_Eventqueuefix)
+	{
+		SetClientEventsPaused(client, false);
+	}
+}
+
+public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style)
 {
 	bool bNoclip = (GetEntityMoveType(client) == MOVETYPE_NOCLIP);
 	bool bInStart = Shavit_InsideZone(client, Zone_Start, track);
@@ -1188,6 +1240,11 @@ public void OnClientPutInServer(int client)
 
 	if(IsFakeClient(client))
 	{
+		if (gCV_BotFootsteps.BoolValue && gH_UpdateStepSound != null)
+		{
+			gH_UpdateStepSound.HookEntity(Hook_Pre,  client, Hook_UpdateStepSound_Pre);
+			gH_UpdateStepSound.HookEntity(Hook_Post, client, Hook_UpdateStepSound_Post);
+		}
 		return;
 	}
 
@@ -1301,6 +1358,7 @@ void PersistData(int client, bool disconnected)
 {
 	if(!IsClientInGame(client) ||
 		(!IsPlayerAlive(client) && !disconnected) ||
+		(!IsPlayerAlive(client) && disconnected && !gB_SaveStates[client]) ||
 		GetSteamAccountID(client) == 0 ||
 		//Shavit_GetTimerStatus(client) == Timer_Stopped ||
 		(!gCV_RestoreStates.BoolValue && !disconnected) ||
@@ -1366,7 +1424,11 @@ void LoadPersistentData(int serial)
 		delete gA_Checkpoints[client];
 		gI_CurrentCheckpoint[client] = aData.iCurrentCheckpoint;
 		gA_Checkpoints[client] = aData.aCheckpoints;
-		OpenCheckpointsMenu(client);
+
+		if (gA_Checkpoints[client].Length > 0)
+		{
+			OpenCheckpointsMenu(client);
+		}
 	}
 
 	gB_SaveStates[client] = false;
@@ -2406,7 +2468,7 @@ void SaveCheckpointCache(int target, cp_cache_t cpcache, bool isPersistentData)
 	{
 		if(gB_Replay)
 		{
-			cpcache.aFrames = Shavit_GetReplayData(target);
+			cpcache.aFrames = Shavit_GetReplayData(target, isPersistentData);
 			cpcache.iPreFrames = Shavit_GetPlayerPreFrame(target);
 			cpcache.iTimerPreFrames = Shavit_GetPlayerTimerFrame(target);
 		}
@@ -2852,7 +2914,7 @@ void ClearClientEventsFrame(int serial)
 {
 	int client = GetClientFromSerial(serial);
 
-	if (client > 0)
+	if (client > 0 && gB_Eventqueuefix)
 	{
 		ClearClientEvents(client);
 	}
@@ -3022,16 +3084,14 @@ public void Player_Spawn(Event event, const char[] name, bool dontBroadcast)
 			RequestFrame(Frame_RemoveRadar, serial);
 		}
 
-		if(gCV_StartOnSpawn.BoolValue)
-		{
-			RestartTimer(client, Track_Main);
-		}
+		bool bCanStartOnSpawn = true;
 
 		if(gB_SaveStates[client])
 		{
 			if(gCV_RestoreStates.BoolValue)
 			{
 				RequestFrame(LoadPersistentData, serial);
+				bCanStartOnSpawn = false;
 			}
 		}
 		else
@@ -3043,7 +3103,13 @@ public void Player_Spawn(Event event, const char[] name, bool dontBroadcast)
 			{
 				gB_SaveStates[client] = true;
 				RequestFrame(LoadPersistentData, serial);
+				bCanStartOnSpawn = false;
 			}
+		}
+
+		if(gCV_StartOnSpawn.BoolValue && bCanStartOnSpawn)
+		{
+			RestartTimer(client, Track_Main);
 		}
 
 		if(gCV_Scoreboard.BoolValue)
@@ -3304,6 +3370,28 @@ public Action WorldDecal(const char[] te_name, const Players[], int numClients, 
 
 public Action NormalSound(int clients[MAXPLAYERS], int &numClients, char sample[PLATFORM_MAX_PATH], int &entity, int &channel, float &volume, int &level, int &pitch, int &flags, char soundEntry[PLATFORM_MAX_PATH], int &seed)
 {
+	if (gEV_Type != Engine_CSGO && IsValidClient(entity) && IsFakeClient(entity) && StrContains(sample, "footsteps/") != -1)
+	{
+		numClients = 0;
+
+		if (gCV_BhopSounds.IntValue < 2)
+		{
+			// The server removes recipients that are in the PVS because CS:S generates the footsteps clientside.
+			// UpdateStepSound clientside bails because of MOVETYPE_NOCLIP though.
+			// So fuck it, add all the clients xd.
+			// Alternatively and preferably you'd patch out the RemoveRecipientsByPVS call in PlayStepSound.
+			for (int i = 1; i <= MaxClients; i++)
+			{
+				if (IsValidClient(i) && (!gB_Hide[i] || GetSpectatorTarget(i) == entity))
+				{
+					clients[numClients++] = i;
+				}
+			}
+		}
+
+		return Plugin_Changed;
+	}
+
 	if(!gCV_BhopSounds.BoolValue)
 	{
 		return Plugin_Continue;

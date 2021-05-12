@@ -135,7 +135,6 @@ Convar gCV_UseHUDFix = null;
 Convar gCV_SpecNameSymbolLength = null;
 Convar gCV_DefaultHUD = null;
 Convar gCV_DefaultHUD2 = null;
-Convar gCV_EnableDynamicTimeDifference = null;
 
 // timer settings
 stylestrings_t gS_StyleStrings[STYLE_LIMIT];
@@ -198,7 +197,6 @@ public void OnPluginStart()
 	gCV_TicksPerUpdate = new Convar("shavit_hud_ticksperupdate", "5", "How often (in ticks) should the HUD update?\nPlay around with this value until you find the best for your server.\nThe maximum value is your tickrate.", 0, true, 1.0, true, (1.0 / GetTickInterval()));
 	gCV_SpectatorList = new Convar("shavit_hud_speclist", "1", "Who to show in the specators list?\n0 - everyone\n1 - all admins (admin_speclisthide override to bypass)\n2 - players you can target", 0, true, 0.0, true, 2.0);
 	gCV_UseHUDFix = new Convar("shavit_hud_csgofix", "1", "Apply the csgo color fix to the center hud?\nThis will add a dollar sign and block sourcemod hooks to hint message", 0, true, 0.0, true, 1.0);
-	gCV_EnableDynamicTimeDifference = new Convar("shavit_hud_timedifference", "0", "Enabled dynamic time differences in the hud", 0, true, 0.0, true, 1.0);
 	gCV_SpecNameSymbolLength = new Convar("shavit_hud_specnamesymbollength", "32", "Maximum player name length that should be displayed in spectators panel", 0, true, 0.0, true, float(MAX_NAME_LENGTH));
 
 	char defaultHUD[8];
@@ -294,8 +292,10 @@ public void OnMapStart()
 
 	if(gB_Late)
 	{
-		Shavit_OnStyleConfigLoaded(-1);
-		Shavit_OnChatConfigLoaded();
+		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
+		chatstrings_t chatstrings;
+		Shavit_GetChatStringsStruct(chatstrings);
+		Shavit_OnChatConfigLoaded(chatstrings);
 	}
 }
 
@@ -377,17 +377,11 @@ public void OnConfigsExecuted()
 
 public void Shavit_OnStyleConfigLoaded(int styles)
 {
-	if(styles == -1)
-	{
-		styles = Shavit_GetStyleCount();
-	}
-
 	gI_Styles = styles;
 
 	for(int i = 0; i < styles; i++)
 	{
-		Shavit_GetStyleStrings(i, sStyleName, gS_StyleStrings[i].sStyleName, sizeof(stylestrings_t::sStyleName));
-		Shavit_GetStyleStrings(i, sHTMLColor, gS_StyleStrings[i].sHTMLColor, sizeof(stylestrings_t::sHTMLColor));
+		Shavit_GetStyleStringsStruct(i, gS_StyleStrings[i]);
 	}
 }
 
@@ -400,7 +394,7 @@ void MakeAngleDiff(int client, float newAngle)
 	gF_AngleDiff[client] = fAngleDiff - 360.0 * RoundToFloor((fAngleDiff + 180.0) / 360.0);
 }
 
-public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style, stylesettings_t stylsettings)
+public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style)
 {
 	gI_Buttons[client] = buttons;
 	MakeAngleDiff(client, angles[1]);
@@ -416,14 +410,9 @@ public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float 
 	return Plugin_Continue;
 }
 
-public void Shavit_OnChatConfigLoaded()
+public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
 {
-	Shavit_GetChatStrings(sMessagePrefix, gS_ChatStrings.sPrefix, sizeof(chatstrings_t::sPrefix));
-	Shavit_GetChatStrings(sMessageText, gS_ChatStrings.sText, sizeof(chatstrings_t::sText));
-	Shavit_GetChatStrings(sMessageWarning, gS_ChatStrings.sWarning, sizeof(chatstrings_t::sWarning));
-	Shavit_GetChatStrings(sMessageVariable, gS_ChatStrings.sVariable, sizeof(chatstrings_t::sVariable));
-	Shavit_GetChatStrings(sMessageVariable2, gS_ChatStrings.sVariable2, sizeof(chatstrings_t::sVariable2));
-	Shavit_GetChatStrings(sMessageStyle, gS_ChatStrings.sStyle, sizeof(chatstrings_t::sStyle));
+	gS_ChatStrings = strings;
 }
 
 public void OnClientPutInServer(int client)
@@ -1142,7 +1131,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 
 			char sTimeDiff[32];
 			
-			if(gB_Replay && gCV_EnableDynamicTimeDifference.BoolValue && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && (gI_HUD2Settings[client] & HUD2_TIMEDIFFERENCE) == 0)
+			if(gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && (gI_HUD2Settings[client] & HUD2_TIMEDIFFERENCE) == 0)
 			{
 				float fClosestReplayTime = Shavit_GetClosestReplayTime(data.iTarget);
 
@@ -1189,7 +1178,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 		// no timer: straight up number
 		if(data.iTimerStatus != Timer_Stopped)
 		{
-			if(gB_Replay && gCV_EnableDynamicTimeDifference.BoolValue && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0)
+			if(gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0)
 			{
 				float res = Shavit_GetClosestReplayVelocityDifference(data.iTarget, (gI_HUDSettings[client] & HUD_2DVEL) == 0);
 				FormatEx(sLine, 128, "%T: %d (%s%.0f)", "HudSpeedText", client, data.iSpeed, (res >= 0.0) ? "+":"", res);
@@ -1380,7 +1369,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 			
 			char sTimeDiff[32];
 			
-			if(gB_Replay && gCV_EnableDynamicTimeDifference.BoolValue && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && (gI_HUD2Settings[client] & HUD2_TIMEDIFFERENCE) == 0)
+			if(gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && (gI_HUD2Settings[client] & HUD2_TIMEDIFFERENCE) == 0)
 			{
 				float fClosestReplayTime = Shavit_GetClosestReplayTime(data.iTarget);
 
@@ -1416,7 +1405,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 			iColor = 0xFFC966;
 		}
 
-		if(data.iTimerStatus != Timer_Stopped && gB_Replay && gCV_EnableDynamicTimeDifference.BoolValue && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0)
+		if(data.iTimerStatus != Timer_Stopped && gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0)
 		{
 			float res = Shavit_GetClosestReplayVelocityDifference(data.iTarget, (gI_HUDSettings[client] & HUD_2DVEL) == 0);
 			FormatEx(sLine, 128, "<span color='#%06X'>%d u/s (%s%.0f)</span>", iColor, data.iSpeed, (res >= 0.0) ? "+":"", res);

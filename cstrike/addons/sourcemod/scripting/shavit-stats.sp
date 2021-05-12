@@ -128,7 +128,9 @@ public void OnMapStart()
 	if(gB_Late)
 	{
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
-		Shavit_OnChatConfigLoaded();
+		chatstrings_t chatstrings;
+		Shavit_GetChatStringsStruct(chatstrings);
+		Shavit_OnChatConfigLoaded(chatstrings);
 	}
 }
 
@@ -136,21 +138,15 @@ public void Shavit_OnStyleConfigLoaded(int styles)
 {
 	for(int i = 0; i < styles; i++)
 	{
-		Shavit_GetStyleStrings(i, sStyleName, gS_StyleStrings[i].sStyleName, sizeof(stylestrings_t::sStyleName));
-		Shavit_GetStyleStrings(i, sShortName, gS_StyleStrings[i].sShortName, sizeof(stylestrings_t::sShortName));
+		Shavit_GetStyleStringsStruct(i, gS_StyleStrings[i]);
 	}
 
 	gI_Styles = styles;
 }
 
-public void Shavit_OnChatConfigLoaded()
+public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
 {
-	Shavit_GetChatStrings(sMessagePrefix, gS_ChatStrings.sPrefix, sizeof(chatstrings_t::sPrefix));
-	Shavit_GetChatStrings(sMessageText, gS_ChatStrings.sText, sizeof(chatstrings_t::sText));
-	Shavit_GetChatStrings(sMessageWarning, gS_ChatStrings.sWarning, sizeof(chatstrings_t::sWarning));
-	Shavit_GetChatStrings(sMessageVariable, gS_ChatStrings.sVariable, sizeof(chatstrings_t::sVariable));
-	Shavit_GetChatStrings(sMessageVariable2, gS_ChatStrings.sVariable2, sizeof(chatstrings_t::sVariable2));
-	Shavit_GetChatStrings(sMessageStyle, gS_ChatStrings.sStyle, sizeof(chatstrings_t::sStyle));
+	gS_ChatStrings = strings;
 }
 
 public void OnClientPutInServer(int client)
@@ -333,10 +329,10 @@ Action OpenStatsMenu(int client, int steamid)
 		FormatEx(sQuery, 2048, "SELECT a.clears, b.maps, c.wrs, d.name, d.ip, d.lastlogin, d.points, e.rank FROM " ...
 				"(SELECT COUNT(*) clears FROM (SELECT map FROM %splayertimes WHERE auth = %d AND track = 0 GROUP BY map) s) a " ...
 				"JOIN (SELECT COUNT(*) maps FROM (SELECT map FROM %smapzones WHERE track = 0 AND type = 0 GROUP BY map) s) b " ...
-				"JOIN (SELECT COUNT(*) wrs FROM %splayertimes a JOIN (SELECT MIN(time) time, map FROM %splayertimes WHERE style = 0 AND track = 0 GROUP by map, style, track) b ON a.time = b.time AND a.map = b.map AND track = 0 AND style = 0 WHERE auth = %d) c " ...
+				"JOIN (SELECT COUNT(*) wrs FROM %swrs WHERE auth = %d AND track = 0 AND style = 0) c " ...
 				"JOIN (SELECT name, ip, lastlogin, FORMAT(points, 2) points FROM %susers WHERE auth = %d) d " ...
 				"JOIN (SELECT COUNT(*) as 'rank' FROM %susers as u1 JOIN (SELECT points FROM %susers WHERE auth = %d) u2 WHERE u1.points >= u2.points) e " ...
-			"LIMIT 1;", gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, gS_MySQLPrefix, steamid, gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, steamid);
+			"LIMIT 1;", gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, steamid, gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, steamid);
 	}
 
 	else
@@ -344,9 +340,9 @@ Action OpenStatsMenu(int client, int steamid)
 		FormatEx(sQuery, 2048, "SELECT a.clears, b.maps, c.wrs, d.name, d.ip, d.lastlogin FROM " ...
 				"(SELECT COUNT(*) clears FROM (SELECT map FROM %splayertimes WHERE auth = %d AND track = 0 GROUP BY map) s) a " ...
 				"JOIN (SELECT COUNT(*) maps FROM (SELECT map FROM %smapzones WHERE track = 0 AND type = 0 GROUP BY map) s) b " ...
-				"JOIN (SELECT COUNT(*) wrs FROM %splayertimes a JOIN (SELECT MIN(time) time, map FROM %splayertimes WHERE style = 0 AND track = 0 GROUP by map, style, track) b ON a.time = b.time AND a.map = b.map AND track = 0 AND style = 0 WHERE auth = %d) c " ...
+				"JOIN (SELECT COUNT(*) wrs FROM %swrs WHERE auth = %d AND track = 0 AND style = 0) c " ...
 				"JOIN (SELECT name, ip, lastlogin FROM %susers WHERE auth = %d) d " ...
-			"LIMIT 1;", gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, gS_MySQLPrefix, steamid, gS_MySQLPrefix, steamid);
+			"LIMIT 1;", gS_MySQLPrefix, steamid, gS_MySQLPrefix, gS_MySQLPrefix, steamid, gS_MySQLPrefix, steamid);
 	}
 
 	gB_CanOpenMenu[client] = false;
