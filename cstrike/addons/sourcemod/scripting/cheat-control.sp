@@ -388,6 +388,7 @@ bool:HasAccess(client, AdminFlag:flag=Admin_Generic) {
 }
 
 bool:CanClientCheat(client) {
+	return true;
 	if (!GetConVarBool(cheatcontrol_adminsonly)) {
 		return true;
 	}
