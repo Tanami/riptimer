@@ -23,6 +23,7 @@
 #include <sdkhooks>
 #include <clientprefs>
 #include <convar_class>
+#include <dhooks>
 
 #undef REQUIRE_PLUGIN
 #include <shavit>
@@ -46,6 +47,7 @@
 #define HUD2_TIMEDIFFERENCE		(1 << 10)
 #define HUD2_PERFS				(1 << 11)
 #define HUD2_TOPLEFT_RANK		(1 << 12)
+#define HUD2_VELOCITYDIFFERENCE (1 << 13)
 
 #define HUD_DEFAULT				(HUD_MASTER|HUD_CENTER|HUD_ZONEHUD|HUD_OBSERVE|HUD_TOPLEFT|HUD_SYNC|HUD_TIMELEFT|HUD_2DVEL|HUD_SPECTATORS)
 #define HUD_DEFAULT2			(HUD2_PERFS)
@@ -217,7 +219,7 @@ public void OnPluginStart()
 		..."HUD_NOPRACALERT			4096\n");
 		
 	IntToString(HUD_DEFAULT2, defaultHUD, 8);
-	gCV_DefaultHUD2 = new Convar("shavit_hud2_default", defaultHUD, "Default HUD2 settings as a bitflag\n"
+	gCV_DefaultHUD2 = new Convar("shavit_hud2_default", defaultHUD, "Default HUD2 settings as a bitflag of what to remove\n"
 		..."HUD2_TIME				1\n"
 		..."HUD2_SPEED				2\n"
 		..."HUD2_JUMPS				4\n"
@@ -230,7 +232,9 @@ public void OnPluginStart()
 		..."HUD2_MAPTIER				512\n"
 		..."HUD2_TIMEDIFFERENCE		1024\n"
 		..."HUD2_PERFS				2048\n"
-		..."HUD2_TOPLEFT_RANK				4096");
+		..."HUD2_TOPLEFT_RANK		4096\n"
+		..."HUD2_VELOCITYDIFFERENCE	8192\n"
+	);
 
 	Convar.AutoExecConfig();
 
@@ -292,10 +296,9 @@ public void OnMapStart()
 
 	if(gB_Late)
 	{
+		gB_Late = false;
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
-		chatstrings_t chatstrings;
-		Shavit_GetChatStringsStruct(chatstrings);
-		Shavit_OnChatConfigLoaded(chatstrings);
+		Shavit_OnChatConfigLoaded();
 	}
 }
 
@@ -410,9 +413,9 @@ public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float 
 	return Plugin_Continue;
 }
 
-public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
+public void Shavit_OnChatConfigLoaded()
 {
-	gS_ChatStrings = strings;
+	Shavit_GetChatStringsStruct(gS_ChatStrings);
 }
 
 public void OnClientPutInServer(int client)
@@ -707,6 +710,10 @@ Action ShowHUDMenu(int client, int item)
 	{
 		FormatEx(sInfo, 16, "@%d", HUD2_TIMEDIFFERENCE);
 		FormatEx(sHudItem, 64, "%T", "HudTimeDifference", client);
+		menu.AddItem(sInfo, sHudItem);
+
+		FormatEx(sInfo, 16, "@%d", HUD2_VELOCITYDIFFERENCE);
+		FormatEx(sHudItem, 64, "%T", "HudVelocityDifference", client);
 		menu.AddItem(sInfo, sHudItem);
 	}
 
@@ -1032,7 +1039,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 
 	if(data.bReplay)
 	{
-		if(data.iStyle != -1 && Shavit_GetReplayStatus(data.iTarget) != Replay_Idle && data.fTime <= data.fWR && Shavit_IsReplayDataLoaded(data.iStyle, data.iTrack))
+		if(data.iStyle != -1 && Shavit_GetReplayStatus(data.iTarget) != Replay_Idle && Shavit_IsReplayDataLoaded(data.iStyle, data.iTrack))
 		{
 			char sTrack[32];
 
@@ -1178,7 +1185,7 @@ int AddHUDToBuffer_Source2013(int client, huddata_t data, char[] buffer, int max
 		// no timer: straight up number
 		if(data.iTimerStatus != Timer_Stopped)
 		{
-			if(gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0)
+			if(gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0 && (gI_HUD2Settings[client] & HUD2_VELOCITYDIFFERENCE) == 0)
 			{
 				float res = Shavit_GetClosestReplayVelocityDifference(data.iTarget, (gI_HUDSettings[client] & HUD_2DVEL) == 0);
 				FormatEx(sLine, 128, "%T: %d (%s%.0f)", "HudSpeedText", client, data.iSpeed, (res >= 0.0) ? "+":"", res);
@@ -1237,7 +1244,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 	{
 		StrCat(buffer, maxlen, "<span class='fontSize-l'>");
 
-		if(data.iStyle != -1 && data.fTime <= data.fWR && Shavit_IsReplayDataLoaded(data.iStyle, data.iTrack))
+		if(data.iStyle != -1 && Shavit_IsReplayDataLoaded(data.iStyle, data.iTrack))
 		{
 			char sPlayerName[MAX_NAME_LENGTH];
 			Shavit_GetReplayName(data.iStyle, data.iTrack, sPlayerName, MAX_NAME_LENGTH);
@@ -1405,7 +1412,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 			iColor = 0xFFC966;
 		}
 
-		if(data.iTimerStatus != Timer_Stopped && gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0)
+		if(data.iTimerStatus != Timer_Stopped && gB_Replay && Shavit_GetReplayFrameCount(Shavit_GetClosestReplayStyle(data.iTarget), data.iTrack) != 0 && Shavit_GetClosestReplayTime(data.iTarget) != -1.0 && (gI_HUD2Settings[client] & HUD2_VELOCITYDIFFERENCE) == 0)
 		{
 			float res = Shavit_GetClosestReplayVelocityDifference(data.iTarget, (gI_HUDSettings[client] & HUD_2DVEL) == 0);
 			FormatEx(sLine, 128, "<span color='#%06X'>%d u/s (%s%.0f)</span>", iColor, data.iSpeed, (res >= 0.0) ? "+":"", res);
@@ -1460,10 +1467,12 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 void UpdateMainHUD(int client)
 {
 	int target = GetSpectatorTarget(client, client);
+	bool bReplay = (gB_Replay && Shavit_IsReplayEntity(target));
 
 	if((gI_HUDSettings[client] & HUD_CENTER) == 0 ||
 		((gI_HUDSettings[client] & HUD_OBSERVE) == 0 && client != target) ||
-		(gEV_Type == Engine_TF2 && (!gB_FirstPrint[target] || GetEngineTime() - gF_ConnectTime[target] < 1.5))) // TF2 has weird handling for hint text
+		(!IsValidClient(target) && !bReplay) ||
+		(gEV_Type == Engine_TF2 && IsValidClient(target) && (!gB_FirstPrint[target] || GetEngineTime() - gF_ConnectTime[target] < 1.5))) // TF2 has weird handling for hint text
 	{
 		return;
 	}
@@ -1472,7 +1481,6 @@ void UpdateMainHUD(int client)
 	GetEntPropVector(target, Prop_Data, "m_vecVelocity", fSpeed);
 
 	float fSpeedHUD = ((gI_HUDSettings[client] & HUD_2DVEL) == 0)? GetVectorLength(fSpeed):(SquareRoot(Pow(fSpeed[0], 2.0) + Pow(fSpeed[1], 2.0)));
-	bool bReplay = (gB_Replay && Shavit_IsReplayEntity(target));
 	ZoneHUD iZoneHUD = ZoneHUD_None;
 	int iReplayStyle = 0;
 	int iReplayTrack = 0;
@@ -1531,12 +1539,11 @@ void UpdateMainHUD(int client)
 	
 	if(IsSource2013(gEV_Type))
 	{
-		if(AddHUDToBuffer_Source2013(client, huddata, sBuffer, 512) > 0)
+		if(!(GetClientButtons(client) & IN_SCORE) && AddHUDToBuffer_Source2013(client, huddata, sBuffer, 512) > 0)
 		{
 			PrintHintText(client, "%s", sBuffer);
 		}
 	}
-	
 	else
 	{
 		StrCat(sBuffer, 512, "<pre>");
@@ -1747,12 +1754,18 @@ void UpdateTopLeftHUD(int client, bool wait)
 	if((!wait || gI_Cycle % 25 == 0) && (gI_HUDSettings[client] & HUD_TOPLEFT) > 0)
 	{
 		int target = GetSpectatorTarget(client, client);
+		bool bReplay = (gB_Replay && Shavit_IsReplayEntity(target));
+
+		if (!bReplay && !IsValidClient(target))
+		{
+			return;
+		}
 
 		int track = 0;
 		int style = 0;
 		float fTargetPB = 0.0;
 
-		if(!(gB_Replay && Shavit_IsReplayEntity(target)))
+		if(!bReplay)
 		{
 			style = Shavit_GetBhopStyle(target);
 			track = Shavit_GetClientTrack(target);
@@ -1779,17 +1792,17 @@ void UpdateTopLeftHUD(int client, bool wait)
 			char sWRName[MAX_NAME_LENGTH];
 			Shavit_GetWRName(style, sWRName, MAX_NAME_LENGTH, track);
 
-			char sTopLeft[128];
-			FormatEx(sTopLeft, 128, "WR: %s (%s)", sWRTime, sWRName);
+			char sTopLeft[512];
+			FormatEx(sTopLeft, sizeof(sTopLeft), "WR: %s (%s)", sWRTime, sWRName);
 
 			char sTargetPB[64];
-			FormatSeconds(fTargetPB, sTargetPB, 64);
-			Format(sTargetPB, 64, "%T: %s", "HudBestText", client, sTargetPB);
+			FormatSeconds(fTargetPB, sTargetPB, sizeof(sTargetPB));
+			Format(sTargetPB, sizeof(sTargetPB), "%T: %s", "HudBestText", client, sTargetPB);
 
 			float fSelfPB = Shavit_GetClientPB(client, style, track);
 			char sSelfPB[64];
-			FormatSeconds(fSelfPB, sSelfPB, 64);
-			Format(sSelfPB, 64, "%T: %s", "HudBestText", client, sSelfPB);
+			FormatSeconds(fSelfPB, sSelfPB, sizeof(sSelfPB));
+			Format(sSelfPB, sizeof(sSelfPB), "%T: %s", "HudBestText", client, sSelfPB);
 
 			if((gI_HUD2Settings[client] & HUD2_SPLITPB) == 0 && target != client)
 			{
@@ -1797,11 +1810,11 @@ void UpdateTopLeftHUD(int client, bool wait)
 				{
 					if((gI_HUD2Settings[client]& HUD2_TOPLEFT_RANK) == 0)
 					{
-						Format(sTopLeft, 128, "%s\n%s (#%d) (%N)", sTopLeft, sTargetPB, Shavit_GetRankForTime(style, fTargetPB, track), target);
+						Format(sTopLeft, sizeof(sTopLeft), "%s\n%s (#%d) (%N)", sTopLeft, sTargetPB, Shavit_GetRankForTime(style, fTargetPB, track), target);
 					}
 					else 
 					{
-						Format(sTopLeft, 128, "%s\n%s (%N)", sTopLeft, sTargetPB, target);
+						Format(sTopLeft, sizeof(sTopLeft), "%s\n%s (%N)", sTopLeft, sTargetPB, target);
 					}
 				}
 
@@ -1809,26 +1822,26 @@ void UpdateTopLeftHUD(int client, bool wait)
 				{
 					if((gI_HUD2Settings[client]& HUD2_TOPLEFT_RANK) == 0)
 					{
-						Format(sTopLeft, 128, "%s\n%s (#%d) (%N)", sTopLeft, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track), client);
+						Format(sTopLeft, sizeof(sTopLeft), "%s\n%s (#%d) (%N)", sTopLeft, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track), client);
 					}
 					else 
 					{
-						Format(sTopLeft, 128, "%s\n%s (%N)", sTopLeft, sSelfPB, client);
+						Format(sTopLeft, sizeof(sTopLeft), "%s\n%s (%N)", sTopLeft, sSelfPB, client);
 					}
 				}
 			}
 
 			else if(fSelfPB != 0.0)
 			{
-				Format(sTopLeft, 128, "%s\n%s (#%d)", sTopLeft, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track));
+				Format(sTopLeft, sizeof(sTopLeft), "%s\n%s (#%d)", sTopLeft, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track));
 			}
 
 			Action result = Plugin_Continue;
 			Call_StartForward(gH_Forwards_OnTopLeftHUD);
 			Call_PushCell(client);
 			Call_PushCell(target);
-			Call_PushStringEx(sTopLeft, 128, SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
-			Call_PushCell(128);
+			Call_PushStringEx(sTopLeft, sizeof(sTopLeft), SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+			Call_PushCell(sizeof(sTopLeft));
 			Call_Finish(result);
 			
 			if(result != Plugin_Continue && result != Plugin_Changed)
@@ -1867,6 +1880,12 @@ void UpdateKeyHint(int client)
 		if(target == client || (gI_HUDSettings[client] & HUD_OBSERVE) > 0)
 		{
 			int bReplay = gB_Replay && Shavit_IsReplayEntity(target);
+
+			if (!bReplay && !IsValidClient(target))
+			{
+				return;
+			}
+
 			int style = bReplay ? Shavit_GetReplayBotStyle(target) : Shavit_GetBhopStyle(target);
 
 			if(!(0 <= style < gI_Styles))

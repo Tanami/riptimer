@@ -23,9 +23,9 @@
 #include <sdkhooks>
 #include <clientprefs>
 #include <convar_class>
+#include <dhooks>
 
 #undef REQUIRE_EXTENSIONS
-#include <dhooks>
 #include <SteamWorks>
 #include <cstrike>
 #include <tf2>
@@ -76,6 +76,7 @@ char gS_PreviousMap[PLATFORM_MAX_PATH];
 int gI_Style[MAXPLAYERS+1];
 Function gH_AfterWarningMenu[MAXPLAYERS+1];
 bool gB_ClosedKZCP[MAXPLAYERS+1];
+int gI_LastWeaponTick[MAXPLAYERS+1];
 
 ArrayList gA_Checkpoints[MAXPLAYERS+1];
 int gI_CurrentCheckpoint[MAXPLAYERS+1];
@@ -110,6 +111,7 @@ Convar gCV_CreateSpawnPoints = null;
 Convar gCV_DisableRadio = null;
 Convar gCV_Scoreboard = null;
 Convar gCV_WeaponCommands = null;
+Convar gCV_WeaponsSpawnGood = null;
 Convar gCV_PlayerOpacity = null;
 Convar gCV_StaticPrestrafe = null;
 Convar gCV_NoclipMe = null;
@@ -152,6 +154,7 @@ Handle gH_Forwards_OnCheckpointMenuSelect = null;
 Handle gH_GetPlayerMaxSpeed = null;
 DynamicHook gH_UpdateStepSound = null;
 DynamicHook gH_IsSpawnPointValid = null;
+DynamicDetour gH_CalcPlayerScore = null;
 
 // modules
 bool gB_Eventqueuefix = false;
@@ -242,11 +245,10 @@ public void OnPluginStart()
 	gA_PersistentData = new ArrayList(sizeof(persistent_data_t));
 
 	// noclip
-	RegConsoleCmd("sm_p", Command_Noclip, "Toggles noclip.");
-	RegConsoleCmd("sm_prac", Command_Noclip, "Toggles noclip. (sm_p alias)");
-	RegConsoleCmd("sm_practice", Command_Noclip, "Toggles noclip. (sm_p alias)");
-	RegConsoleCmd("sm_nc", Command_Noclip, "Toggles noclip. (sm_p alias)");
-	RegConsoleCmd("sm_noclipme", Command_Noclip, "Toggles noclip. (sm_p alias)");
+	RegConsoleCmd("sm_prac", Command_Noclip, "Toggles noclip. (sm_nc alias)");
+	RegConsoleCmd("sm_practice", Command_Noclip, "Toggles noclip. (sm_nc alias)");
+	RegConsoleCmd("sm_nc", Command_Noclip, "Toggles noclip.");
+	RegConsoleCmd("sm_noclipme", Command_Noclip, "Toggles noclip. (sm_nc alias)");
 	AddCommandListener(CommandListener_Noclip, "+noclip");
 	AddCommandListener(CommandListener_Noclip, "-noclip");
 
@@ -303,6 +305,7 @@ public void OnPluginStart()
 	gCV_DisableRadio = new Convar("shavit_misc_disableradio", "1", "Block radio commands.\n0 - Disabled (radio commands work)\n1 - Enabled (radio commands are blocked)", 0, true, 0.0, true, 1.0);
 	gCV_Scoreboard = new Convar("shavit_misc_scoreboard", "1", "Manipulate scoreboard so score is -{time} and deaths are {rank})?\nDeaths part requires shavit-rankings.\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
 	gCV_WeaponCommands = new Convar("shavit_misc_weaponcommands", "2", "Enable sm_usp, sm_glock and sm_knife?\n0 - Disabled\n1 - Enabled\n2 - Also give infinite reserved ammo.\n3 - Also give infinite clip ammo.", 0, true, 0.0, true, 3.0);
+	gCV_WeaponsSpawnGood = new Convar("shavit_misc_weaponsspawngood", "1", "Make glocks spawn on burst-fire and USPs spawn with a silencer on.", 0, true, 0.0, true, 1.0);
 	gCV_PlayerOpacity = new Convar("shavit_misc_playeropacity", "69", "Player opacity (alpha) to set on spawn.\n-1 - Disabled\nValue can go up to 255. 0 for invisibility.", 0, true, -1.0, true, 255.0);
 	gCV_StaticPrestrafe = new Convar("shavit_misc_staticprestrafe", "1", "Force prestrafe for every pistol.\n250 is the default value and some styles will have 260.\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
 	gCV_NoclipMe = new Convar("shavit_misc_noclipme", "1", "Allow +noclip, sm_p and all the noclip commands?\n0 - Disabled\n1 - Enabled\n2 - requires 'admin_noclipme' override or ADMFLAG_CHEATS flag.", 0, true, 0.0, true, 2.0);
@@ -335,53 +338,11 @@ public void OnPluginStart()
 	CreateTimer(10.0, Timer_Cron, 0, TIMER_REPEAT);
 	CreateTimer(0.5, Timer_PersistKZCP, 0, TIMER_REPEAT);
 
+	LoadDHooks();
+
 	if(gEV_Type != Engine_TF2)
 	{
 		CreateTimer(1.0, Timer_Scoreboard, 0, TIMER_REPEAT);
-
-		if(LibraryExists("dhooks"))
-		{
-			Handle hGameData = LoadGameConfigFile("shavit.games");
-
-			if(hGameData != null)
-			{
-				int iOffset = GameConfGetOffset(hGameData, "CCSPlayer::GetPlayerMaxSpeed");
-
-				if(iOffset != -1)
-				{
-					gH_GetPlayerMaxSpeed = DHookCreate(iOffset, HookType_Entity, ReturnType_Float, ThisPointer_CBaseEntity, CCSPlayer__GetPlayerMaxSpeed);
-				}
-				else
-				{
-					SetFailState("Couldn't get the offset for \"CCSPlayer::GetPlayerMaxSpeed\" - make sure your gamedata is updated!");
-				}
-
-				if ((iOffset = GameConfGetOffset(hGameData, "CBasePlayer::UpdateStepSound")) != -1)
-				{
-					gH_UpdateStepSound = new DynamicHook(iOffset, HookType_Entity, ReturnType_Void, ThisPointer_CBaseEntity);
-					gH_UpdateStepSound.AddParam(HookParamType_ObjectPtr);
-					gH_UpdateStepSound.AddParam(HookParamType_VectorPtr);
-					gH_UpdateStepSound.AddParam(HookParamType_VectorPtr);
-				}
-				else
-				{
-					LogError("Couldn't get the offset for \"CBasePlayer::UpdateStepSound\" - make sure your gamedata is updated!");
-				}
-
-				if ((iOffset = GameConfGetOffset(hGameData, "CGameRules::IsSpawnPointValid")) != -1)
-				{
-					gH_IsSpawnPointValid = new DynamicHook(iOffset, HookType_GameRules, ReturnType_Bool, ThisPointer_Ignore);
-					gH_IsSpawnPointValid.AddParam(HookParamType_CBaseEntity);
-					gH_IsSpawnPointValid.AddParam(HookParamType_CBaseEntity);
-				}
-				else
-				{
-					SetFailState("Couldn't get the offset for \"CGameRules::IsSpawnPointValid\" - make sure your gamedata is updated!");
-				}
-			}
-
-			delete hGameData;
-		}
 	}
 
 	// late load
@@ -409,6 +370,71 @@ public void OnPluginStart()
 	gB_Chat = LibraryExists("shavit-chat");
 }
 
+void LoadDHooks()
+{
+	Handle hGameData = LoadGameConfigFile("shavit.games");
+
+	if (hGameData == null)
+	{
+		SetFailState("Failed to load shavit gamedata");
+	}
+
+	int iOffset;
+
+	if (gEV_Type == Engine_TF2)
+	{
+		if (!(gH_CalcPlayerScore = DHookCreateDetour(Address_Null, CallConv_CDECL, ReturnType_Int, ThisPointer_Ignore)))
+		{
+			SetFailState("Failed to create detour for CTFGameRules::CalcPlayerScore");
+		}
+
+		if (DHookSetFromConf(gH_CalcPlayerScore, hGameData, SDKConf_Signature, "CTFGameRules::CalcPlayerScore"))
+		{
+			gH_CalcPlayerScore.AddParam(HookParamType_Int);
+			gH_CalcPlayerScore.AddParam(HookParamType_CBaseEntity);
+			gH_CalcPlayerScore.Enable(Hook_Pre, Detour_CalcPlayerScore);
+		}
+		else
+		{
+			LogError("Couldn't get the address for \"CTFGameRules::CalcPlayerScore\" - make sure your gamedata is updated!");
+		}
+	}
+	else
+	{
+		if ((iOffset = GameConfGetOffset(hGameData, "CCSPlayer::GetPlayerMaxSpeed")) == -1)
+		{
+			SetFailState("Couldn't get the offset for \"CCSPlayer::GetPlayerMaxSpeed\" - make sure your gamedata is updated!");
+		}
+
+		gH_GetPlayerMaxSpeed = DHookCreate(iOffset, HookType_Entity, ReturnType_Float, ThisPointer_CBaseEntity, CCSPlayer__GetPlayerMaxSpeed);
+	}
+
+	if ((iOffset = GameConfGetOffset(hGameData, "CBasePlayer::UpdateStepSound")) != -1)
+	{
+		gH_UpdateStepSound = new DynamicHook(iOffset, HookType_Entity, ReturnType_Void, ThisPointer_CBaseEntity);
+		gH_UpdateStepSound.AddParam(HookParamType_ObjectPtr);
+		gH_UpdateStepSound.AddParam(HookParamType_VectorPtr);
+		gH_UpdateStepSound.AddParam(HookParamType_VectorPtr);
+	}
+	else
+	{
+		LogError("Couldn't get the offset for \"CBasePlayer::UpdateStepSound\" - make sure your gamedata is updated!");
+	}
+
+	if ((iOffset = GameConfGetOffset(hGameData, "CGameRules::IsSpawnPointValid")) != -1)
+	{
+		gH_IsSpawnPointValid = new DynamicHook(iOffset, HookType_GameRules, ReturnType_Bool, ThisPointer_Ignore);
+		gH_IsSpawnPointValid.AddParam(HookParamType_CBaseEntity);
+		gH_IsSpawnPointValid.AddParam(HookParamType_CBaseEntity);
+	}
+	else
+	{
+		SetFailState("Couldn't get the offset for \"CGameRules::IsSpawnPointValid\" - make sure your gamedata is updated!");
+	}
+
+	delete hGameData;
+}
+
 public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] newValue)
 {
 	if (sv_disable_radar != null)
@@ -426,6 +452,21 @@ public MRESReturn Hook_IsSpawnPointValid(Handle hReturn, Handle hParams)
 	}
 
 	return MRES_Ignored;
+}
+
+MRESReturn Detour_CalcPlayerScore(DHookReturn hReturn, DHookParam hParams)
+{
+	if (!gCV_Scoreboard.BoolValue)
+	{
+		return MRES_Ignored;
+	}
+
+	int client = hParams.Get(2);
+	float fPB = Shavit_GetClientPB(client, 0, Track_Main);
+	int iScore = (fPB != 0.0 && fPB < 2000)? -RoundToFloor(fPB):-2000;
+
+	hReturn.Value = iScore;
+	return MRES_Supercede;
 }
 
 public void OnClientCookiesCached(int client)
@@ -474,9 +515,9 @@ public void Shavit_OnStyleConfigLoaded(int styles)
 	}
 }
 
-public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
+public void Shavit_OnChatConfigLoaded()
 {
-	gS_ChatStrings = strings;
+	Shavit_GetChatStringsStruct(gS_ChatStrings);
 
 	if(!LoadAdvertisementsConfig())
 	{
@@ -527,20 +568,27 @@ public void OnConfigsExecuted()
 	}
 }
 
+void CreateSpawnPoint(int iTeam, float fOrigin[3], float fAngles[3])
+{
+	int iSpawnPoint = CreateEntityByName((gEV_Type == Engine_TF2)? "info_player_teamspawn":((iTeam == 2)? "info_player_terrorist":"info_player_counterterrorist"));
+
+	if (DispatchSpawn(iSpawnPoint))
+	{
+		if (gEV_Type == Engine_TF2)
+		{
+			SetEntProp(iSpawnPoint, Prop_Send, "m_iTeamNum", iTeam);
+		}
+
+		TeleportEntity(iSpawnPoint, fOrigin, fAngles, NULL_VECTOR);
+	}
+}
+
 public void OnMapStart()
 {
-	if (gH_IsSpawnPointValid != null)
-	{
-		gH_IsSpawnPointValid.HookGamerules(Hook_Post, Hook_IsSpawnPointValid);
-	}
+	gH_IsSpawnPointValid.HookGamerules(Hook_Post, Hook_IsSpawnPointValid);
 
 	GetCurrentMap(gS_CurrentMap, 192);
 	GetMapDisplayName(gS_CurrentMap, gS_CurrentMap, 192);
-
-	for(int i = 1; i <= MaxClients; i++)
-	{
-		ResetCheckpoints(i);
-	}
 
 	if (!StrEqual(gS_CurrentMap, gS_PreviousMap, false))
 	{
@@ -556,27 +604,56 @@ public void OnMapStart()
 
 	if(gCV_CreateSpawnPoints.IntValue > 0)
 	{
-		int iEntity = -1;
+		int info_player_terrorist        = FindEntityByClassname(-1, "info_player_terrorist");
+		int info_player_counterterrorist = FindEntityByClassname(-1, "info_player_counterterrorist");
+		int info_player_teamspawn        = FindEntityByClassname(-1, "info_player_teamspawn");
+		int info_player_start            = FindEntityByClassname(-1, "info_player_start");
 
-		if((iEntity = FindEntityByClassname(iEntity, "info_player_terrorist")) != -1 || // CS:S/CS:GO T
-			(iEntity = FindEntityByClassname(iEntity, "info_player_counterterrorist")) != -1 || // CS:S/CS:GO CT
-			(iEntity = FindEntityByClassname(iEntity, "info_player_teamspawn")) != -1 || // TF2 spawn point
-			(iEntity = FindEntityByClassname(iEntity, "info_player_start")) != -1)
+		int iEntity =
+			((info_player_terrorist != -1)        ? info_player_terrorist :
+			((info_player_counterterrorist != -1) ? info_player_counterterrorist :
+			((info_player_teamspawn != -1)        ? info_player_teamspawn :
+			((info_player_start != -1)            ? info_player_start : -1))));
+
+		if (iEntity != -1)
 		{
 			float fOrigin[3], fAngles[3];
 			GetEntPropVector(iEntity, Prop_Send, "m_vecOrigin", fOrigin);
 			GetEntPropVector(iEntity, Prop_Data, "m_angAbsRotation", fAngles);
 
-			for(int i = 1; i <= gCV_CreateSpawnPoints.IntValue; i++)
+			if (gEV_Type == Engine_TF2)
 			{
-				for(int iTeam = 1; iTeam <= 2; iTeam++)
-				{
-					int iSpawnPoint = CreateEntityByName((gEV_Type == Engine_TF2)? "info_player_teamspawn":((iTeam == 1)? "info_player_terrorist":"info_player_counterterrorist"));
+				int iSearch = -1;
+				bool haveRed = false;
+				bool haveBlu = false;
 
-					if(DispatchSpawn(iSpawnPoint))
-					{
-						TeleportEntity(iSpawnPoint, fOrigin, fAngles, NULL_VECTOR);
-					}
+				while ((iSearch = FindEntityByClassname(iSearch, "info_player_teamspawn")) != -1)
+				{
+					int team = GetEntProp(iSearch, Prop_Send, "m_iTeamNum");
+					haveRed = haveRed || team == 2;
+					haveBlu = haveBlu || team == 3;
+				}
+
+				if (!haveRed)
+				{
+					CreateSpawnPoint(2, fOrigin, fAngles);
+				}
+
+				if (!haveBlu)
+				{
+					CreateSpawnPoint(3, fOrigin, fAngles);
+				}
+			}
+			else
+			{
+				if (info_player_terrorist == -1)
+				{
+					CreateSpawnPoint(2, fOrigin, fAngles);
+				}
+
+				if (info_player_counterterrorist == -1)
+				{
+					CreateSpawnPoint(3, fOrigin, fAngles);
 				}
 			}
 		}
@@ -584,10 +661,9 @@ public void OnMapStart()
 
 	if(gB_Late)
 	{
+		gB_Late = false;
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
-		chatstrings_t chatstrings;
-		Shavit_GetChatStringsStruct(chatstrings);
-		Shavit_OnChatConfigLoaded(chatstrings);
+		Shavit_OnChatConfigLoaded();
 	}
 
 	if(gCV_AdvertisementInterval.FloatValue > 0.0)
@@ -789,9 +865,9 @@ public Action Command_Jointeam(int client, const char[] command, int args)
 		{
 			TF2_RespawnPlayer(client);
 		}
-
 		else
 		{
+			RemoveAllWeapons(client); // so weapons are removed and we don't hit the edict limit
 			CS_RespawnPlayer(client);
 		}
 
@@ -904,7 +980,7 @@ public Action Timer_Cron(Handle timer)
 		persistent_data_t aData;
 		gA_PersistentData.GetArray(i, aData);
 
-		if(fTime - aData.fDisconnectTime >= gCV_PersistData.FloatValue)
+		if(aData.fDisconnectTime != 0.0 && (fTime - aData.fDisconnectTime >= gCV_PersistData.FloatValue))
 		{
 			DeletePersistentData(i, aData);
 		}
@@ -920,7 +996,7 @@ public Action Timer_PersistKZCP(Handle timer)
 		if(!gB_ClosedKZCP[i] &&
 			Shavit_GetStyleSettingInt(gI_Style[i], "kzcheckpoints")
 			&& GetClientMenu(i) == MenuSource_None &&
-			IsClientInGame(i) && IsPlayerAlive(i))
+			IsClientInGame(i) && IsPlayerAlive(i) && !IsFakeClient(i))
 		{
 			OpenKZCPMenu(i);
 		}
@@ -1013,7 +1089,7 @@ public Action Timer_Advertisement(Handle timer)
 
 void UpdateScoreboard(int client)
 {
-	// this doesn't work on tf2 for some reason
+	// this doesn't work on tf2 probably because of CTFGameRules::CalcPlayerScore
 	if(gEV_Type == Engine_TF2)
 	{
 		return;
@@ -1027,7 +1103,6 @@ void UpdateScoreboard(int client)
 	{
 		CS_SetClientContributionScore(client, iScore);
 	}
-
 	else
 	{
 		SetEntProp(client, Prop_Data, "m_iFrags", iScore);
@@ -1142,6 +1217,14 @@ public void Shavit_OnResume(int client, int track)
 	}
 }
 
+public void Shavit_OnStop(int client, int track)
+{
+	if (gB_Eventqueuefix)
+	{
+		SetClientEventsPaused(client, false);
+	}
+}
+
 public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style)
 {
 	bool bNoclip = (GetEntityMoveType(client) == MOVETYPE_NOCLIP);
@@ -1175,17 +1258,13 @@ public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float 
 	// prespeed
 	if(!bNoclip && Shavit_GetStyleSettingInt(gI_Style[client], "prespeed") == 0 && bInStart)
 	{
-		if((gCV_PreSpeed.IntValue == 2 || gCV_PreSpeed.IntValue == 3) && gI_GroundEntity[client] == -1 && iGroundEntity != -1 && (buttons & IN_JUMP) > 0)
+		int iPrevGroundEntity = (gI_GroundEntity[client] != -1) ? EntRefToEntIndex(gI_GroundEntity[client]) : -1;
+		if((gCV_PreSpeed.IntValue == 2 || gCV_PreSpeed.IntValue == 3) && iPrevGroundEntity == -1 && iGroundEntity != -1 && (buttons & IN_JUMP) > 0)
 		{
 			TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, view_as<float>({0.0, 0.0, 0.0}));
 			Shavit_PrintToChat(client, "%T", "BHStartZoneDisallowed", client, gS_ChatStrings.sVariable, gS_ChatStrings.sText, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
-
-			gI_GroundEntity[client] = iGroundEntity;
-
-			return Plugin_Continue;
 		}
-
-		if(gCV_PreSpeed.IntValue == 1 || gCV_PreSpeed.IntValue >= 3)
+		else if(gCV_PreSpeed.IntValue == 1 || gCV_PreSpeed.IntValue >= 3)
 		{
 			float fSpeed[3];
 			GetEntPropVector(client, Prop_Data, "m_vecAbsVelocity", fSpeed);
@@ -1222,7 +1301,7 @@ public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float 
 		}
 	}
 
-	gI_GroundEntity[client] = iGroundEntity;
+	gI_GroundEntity[client] = (iGroundEntity != -1) ? EntIndexToEntRef(iGroundEntity) : -1;
 
 	return Plugin_Continue;
 }
@@ -1233,10 +1312,7 @@ public void OnClientPutInServer(int client)
 	SDKHook(client, SDKHook_WeaponDrop, OnWeaponDrop);
 	SDKHook(client, SDKHook_OnTakeDamage, OnTakeDamage);
 
-	if(gEV_Type == Engine_TF2)
-	{
-		SDKHook(client, SDKHook_PreThinkPost, OnPreThink);
-	}
+	gI_LastWeaponTick[client] = 0;
 
 	if(IsFakeClient(client))
 	{
@@ -1248,16 +1324,23 @@ public void OnClientPutInServer(int client)
 		return;
 	}
 
+	if(gEV_Type == Engine_TF2)
+	{
+		SDKHook(client, SDKHook_PreThinkPost, OnPreThink);
+	}
+	else
+	{
+		if(gH_GetPlayerMaxSpeed != null)
+		{
+			DHookEntity(gH_GetPlayerMaxSpeed, true, client);
+		}
+	}
+
 	if(!AreClientCookiesCached(client))
 	{
 		gI_Style[client] = Shavit_GetBhopStyle(client);
 		gB_Hide[client] = false;
 		gI_CheckpointsSettings[client] = CP_DEFAULT;
-	}
-
-	if(gH_GetPlayerMaxSpeed != null)
-	{
-		DHookEntity(gH_GetPlayerMaxSpeed, true, client);
 	}
 
 	if(gA_Checkpoints[client] == null)
@@ -1310,28 +1393,6 @@ public void OnClientDisconnect(int client)
 	delete gA_Checkpoints[client];
 }
 
-void FillPersistentData(int client, persistent_data_t aData, bool disconnected)
-{
-	aData.iSteamID = GetSteamAccountID(client);
-	aData.fDisconnectTime = GetEngineTime();
-	aData.iTimesTeleported = gI_TimesTeleported[client];
-
-	if (disconnected)
-	{
-		aData.iCurrentCheckpoint = gI_CurrentCheckpoint[client];
-		aData.aCheckpoints = gA_Checkpoints[client];
-		gA_Checkpoints[client] = null;
-
-		if (gB_SaveStates[client])
-		{
-			// the rest of the data has already been filled
-			return;
-		}
-	}
-
-	SaveCheckpointCache(client, aData.cpcache, true);
-}
-
 int FindPersistentData(int client, persistent_data_t aData)
 {
 	int iSteamID;
@@ -1343,10 +1404,12 @@ int FindPersistentData(int client, persistent_data_t aData)
 
 	for(int i = 0; i < gA_PersistentData.Length; i++)
 	{
-		gA_PersistentData.GetArray(i, aData);
+		persistent_data_t temp;
+		gA_PersistentData.GetArray(i, temp);
 
-		if(iSteamID == aData.iSteamID)
+		if(iSteamID == temp.iSteamID)
 		{
+			aData = temp;
 			return i;
 		}
 	}
@@ -1369,7 +1432,33 @@ void PersistData(int client, bool disconnected)
 
 	persistent_data_t aData;
 	int iIndex = FindPersistentData(client, aData);
-	FillPersistentData(client, aData, disconnected);
+
+	aData.iSteamID = GetSteamAccountID(client);
+	aData.iTimesTeleported = gI_TimesTeleported[client];
+
+	if (disconnected)
+	{
+		aData.fDisconnectTime = GetEngineTime();
+		aData.iCurrentCheckpoint = gI_CurrentCheckpoint[client];
+		aData.aCheckpoints = gA_Checkpoints[client];
+		gA_Checkpoints[client] = null;
+
+		if (gB_Replay && aData.cpcache.aFrames == null)
+		{
+			aData.cpcache.aFrames = Shavit_GetReplayData(client, true);
+			aData.cpcache.iPreFrames = Shavit_GetPlayerPreFrame(client);
+			aData.cpcache.iTimerPreFrames = Shavit_GetPlayerTimerFrame(client);
+		}
+	}
+	else
+	{
+		aData.fDisconnectTime = 0.0;
+	}
+
+	if (!gB_SaveStates[client])
+	{
+		SaveCheckpointCache(client, aData.cpcache, false);
+	}
 
 	gB_SaveStates[client] = true;
 
@@ -1379,16 +1468,16 @@ void PersistData(int client, bool disconnected)
 	}
 	else
 	{
-		gA_PersistentData.SetArray(iIndex, aData, sizeof(aData));
+		gA_PersistentData.SetArray(iIndex, aData);
 	}
 }
 
 void DeletePersistentData(int index, persistent_data_t data)
 {
-	ResetCheckpointsInner(data.aCheckpoints);
-	delete data.aCheckpoints;
-	DeleteCheckpointCache(data.cpcache);
 	gA_PersistentData.Erase(index);
+	DeleteCheckpointCache(data.cpcache);
+	DeleteCheckpointCacheList(data.aCheckpoints);
+	delete data.aCheckpoints;
 }
 
 void LoadPersistentData(int serial)
@@ -1411,19 +1500,17 @@ void LoadPersistentData(int serial)
 		return;
 	}
 
-	Shavit_StopTimer(client);
-
 	LoadCheckpointCache(client, aData.cpcache, true);
-	DeleteCheckpointCache(aData.cpcache);
 
 	gI_TimesTeleported[client] = aData.iTimesTeleported;
 
 	if (aData.aCheckpoints != null)
 	{
-		ResetCheckpointsInner(gA_Checkpoints[client]);
+		DeleteCheckpointCacheList(gA_Checkpoints[client]);
 		delete gA_Checkpoints[client];
 		gI_CurrentCheckpoint[client] = aData.iCurrentCheckpoint;
 		gA_Checkpoints[client] = aData.aCheckpoints;
+		aData.aCheckpoints = null;
 
 		if (gA_Checkpoints[client].Length > 0)
 		{
@@ -1432,7 +1519,7 @@ void LoadPersistentData(int serial)
 	}
 
 	gB_SaveStates[client] = false;
-	gA_PersistentData.Erase(iIndex);
+	DeletePersistentData(iIndex, aData);
 }
 
 void DeleteCheckpointCache(cp_cache_t cache)
@@ -1442,7 +1529,7 @@ void DeleteCheckpointCache(cp_cache_t cache)
 	delete cache.aOutputWaits;
 }
 
-void ResetCheckpointsInner(ArrayList cps)
+void DeleteCheckpointCacheList(ArrayList cps)
 {
 	if (cps != null)
 	{
@@ -1459,11 +1546,11 @@ void ResetCheckpointsInner(ArrayList cps)
 
 void ResetCheckpoints(int client)
 {
-	ResetCheckpointsInner(gA_Checkpoints[client]);
+	DeleteCheckpointCacheList(gA_Checkpoints[client]);
 	gI_CurrentCheckpoint[client] = 0;
 }
 
-public Action OnTakeDamage(int victim, int attacker)
+public Action OnTakeDamage(int victim, int& attacker)
 {
 	if(gB_Hide[victim] || gCV_GodMode.IntValue >= 2)
 	{
@@ -1594,16 +1681,12 @@ public Action Command_Hide(int client, int args)
 	}
 
 	gB_Hide[client] = !gB_Hide[client];
-
-	char sCookie[4];
-	IntToString(view_as<int>(gB_Hide[client]), sCookie, 4);
-	SetClientCookie(client, gH_HideCookie, sCookie);
+	SetClientCookie(client, gH_HideCookie, gB_Hide[client] ? "1" : "0");
 
 	if(gB_Hide[client])
 	{
 		Shavit_PrintToChat(client, "%T", "HideEnabled", client, gS_ChatStrings.sVariable, gS_ChatStrings.sText);
 	}
-
 	else
 	{
 		Shavit_PrintToChat(client, "%T", "HideDisabled", client, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
@@ -1637,7 +1720,7 @@ public Action Command_Spec(int client, int args)
 	}
 	else if(gB_Replay)
 	{
-		target = Shavit_GetReplayBotIndex(-1, 0); // try to find normal bot
+		target = Shavit_GetReplayBotIndex(0, -1); // try to find normal bot
 
 		if (target < 1)
 		{
@@ -1779,6 +1862,38 @@ bool Teleport(int client, int targetserial)
 	return true;
 }
 
+void Frame_WeaponsSpawnGood(int ref)
+{
+	int entity = EntRefToEntIndex(ref);
+
+	if (entity > 0)
+	{
+		char classname[64];
+		GetEntityClassname(entity, classname, sizeof(classname));
+
+		if (StrEqual(classname, "weapon_glock"))
+		{
+			SetEntProp(entity, Prop_Send, "m_bBurstMode", 1);
+		}
+		else if (gEV_Type == Engine_CSS && StrEqual(classname, "weapon_usp")) // usp
+		{
+			SetEntProp(entity, Prop_Send, "m_bSilencerOn", 1);
+			SetEntProp(entity, Prop_Send, "m_weaponMode", 1);
+		}
+	}
+}
+
+public void OnEntityCreated(int entity, const char[] classname)
+{
+	if (gCV_WeaponsSpawnGood.BoolValue)
+	{
+		if (StrEqual(classname, "weapon_glock") || (gEV_Type == Engine_CSS && StrEqual(classname, "weapon_usp")))
+		{
+			RequestFrame(Frame_WeaponsSpawnGood, EntIndexToEntRef(entity));
+		}
+	}
+}
+
 public Action Command_Weapon(int client, int args)
 {
 	if(!IsValidClient(client) || gEV_Type == Engine_TF2)
@@ -1800,6 +1915,13 @@ public Action Command_Weapon(int client, int args)
 		return Plugin_Handled;
 	}
 
+	if (GetGameTickCount() - gI_LastWeaponTick[client] < 10)
+	{
+		return Plugin_Handled;
+	}
+
+	gI_LastWeaponTick[client] = GetGameTickCount();
+
 	char sCommand[16];
 	GetCmdArg(0, sCommand, 16);
 
@@ -1810,12 +1932,10 @@ public Action Command_Weapon(int client, int args)
 	{
 		strcopy(sWeapon, 32, (gEV_Type == Engine_CSS)? "weapon_usp":"weapon_usp_silencer");
 	}
-
 	else if(StrContains(sCommand, "glock", false) != -1)
 	{
 		strcopy(sWeapon, 32, "weapon_glock");
 	}
-
 	else
 	{
 		strcopy(sWeapon, 32, "weapon_knife");
@@ -2373,7 +2493,7 @@ bool SaveCheckpoint(int client)
 	}
 
 	cp_cache_t cpcache;
-	SaveCheckpointCache(target, cpcache, false);
+	SaveCheckpointCache(target, cpcache, true);
 	gI_CurrentCheckpoint[client] = index;
 
 	if(overflow)
@@ -2392,33 +2512,45 @@ bool SaveCheckpoint(int client)
 	return true;
 }
 
-void SaveCheckpointCache(int target, cp_cache_t cpcache, bool isPersistentData)
+void SaveCheckpointCache(int target, cp_cache_t cpcache, bool actually_a_checkpoint)
 {
 	GetClientAbsOrigin(target, cpcache.fPosition);
 	GetClientEyeAngles(target, cpcache.fAngles);
 	GetEntPropVector(target, Prop_Data, "m_vecAbsVelocity", cpcache.fVelocity);
-	GetEntPropVector(target, Prop_Data, "m_vecLadderNormal", cpcache.fLadderNormal);
+	GetEntPropVector(target, Prop_Data, "m_vecLadderNormal", cpcache.vecLadderNormal);
 
 	cpcache.iMoveType = GetEntityMoveType(target);
 	cpcache.fGravity = GetEntityGravity(target);
 	cpcache.fSpeed = GetEntPropFloat(target, Prop_Send, "m_flLaggedMovementValue");
 
-	int iFlags = GetEntityFlags(target);
-	iFlags &= ~(FL_ATCONTROLS|FL_FAKECLIENT);
-
 	if(IsFakeClient(target))
 	{
 		cpcache.iGroundEntity = -1;
-		cpcache.iMoveType = MOVETYPE_WALK; // uhhh, yeah... TODO fix me if I ever get bots to NOT use MOVETYPE_NOCLIP... (I think actual .nav files might need to be generated for that?)
+
+		if (cpcache.iMoveType == MOVETYPE_NOCLIP)
+		{
+			cpcache.iMoveType = MOVETYPE_WALK;
+		}
 	}
 	else
 	{
 		cpcache.iGroundEntity = GetEntPropEnt(target, Prop_Data, "m_hGroundEntity");
+
+		if (cpcache.iGroundEntity != -1)
+		{
+			cpcache.iGroundEntity = EntIndexToEntRef(cpcache.iGroundEntity);
+		}
+
 		GetEntityClassname(target, cpcache.sClassname, 64);
 		GetEntPropString(target, Prop_Data, "m_iName", cpcache.sTargetname, 64);
 	}
 
-	cpcache.iFlags = iFlags;
+	if (cpcache.iMoveType == MOVETYPE_NONE)
+	{
+		cpcache.iMoveType = MOVETYPE_WALK;
+	}
+
+	cpcache.iFlags = GetEntityFlags(target) & ~(FL_ATCONTROLS|FL_FAKECLIENT);
 
 	if(gEV_Type != Engine_TF2)
 	{
@@ -2463,27 +2595,23 @@ void SaveCheckpointCache(int target, cp_cache_t cpcache, bool isPersistentData)
 	}
 
 	cpcache.aSnapshot = snapshot;
+	cpcache.bSegmented = CanSegment(target);
 
-	if(CanSegment(target) || isPersistentData)
+	if (cpcache.bSegmented && gB_Replay && actually_a_checkpoint && cpcache.aFrames == null)
 	{
-		if(gB_Replay)
+		cpcache.aFrames = Shavit_GetReplayData(target, false);
+		cpcache.iPreFrames = Shavit_GetPlayerPreFrame(target);
+		cpcache.iTimerPreFrames = Shavit_GetPlayerTimerFrame(target);
+	}
+
+	if (gB_Eventqueuefix && !IsFakeClient(target))
+	{
+		eventpack_t ep;
+
+		if (GetClientEvents(target, ep))
 		{
-			cpcache.aFrames = Shavit_GetReplayData(target, isPersistentData);
-			cpcache.iPreFrames = Shavit_GetPlayerPreFrame(target);
-			cpcache.iTimerPreFrames = Shavit_GetPlayerTimerFrame(target);
-		}
-
-		cpcache.bSegmented = true;
-
-		if (gB_Eventqueuefix && !IsFakeClient(target))
-		{
-			eventpack_t ep;
-
-			if (GetClientEvents(target, ep))
-			{
-				cpcache.aEvents = ep.playerEvents;
-				cpcache.aOutputWaits = ep.outputWaits;
-			}
+			cpcache.aEvents = ep.playerEvents;
+			cpcache.aOutputWaits = ep.outputWaits;
 		}
 	}
 
@@ -2562,16 +2690,16 @@ void TeleportToCheckpoint(int client, int index, bool suppressMessage)
 
 void LoadCheckpointCache(int client, cp_cache_t cpcache, bool isPersistentData)
 {
-	MoveType mt = cpcache.iMoveType;
-
-	SetEntityMoveType(client, mt);
+	SetEntityMoveType(client, cpcache.iMoveType);
 	SetEntityFlags(client, cpcache.iFlags);
 	SetEntPropFloat(client, Prop_Send, "m_flLaggedMovementValue", cpcache.fSpeed);
-	SetEntPropEnt(client, Prop_Data, "m_hGroundEntity", cpcache.iGroundEntity);
+
+	int ground = (cpcache.iGroundEntity != -1) ? EntRefToEntIndex(cpcache.iGroundEntity) : -1;
+	SetEntPropEnt(client, Prop_Data, "m_hGroundEntity", ground);
 
 	if(gEV_Type != Engine_TF2)
 	{
-		SetEntPropVector(client, Prop_Data, "m_vecLadderNormal", cpcache.fLadderNormal);
+		SetEntPropVector(client, Prop_Data, "m_vecLadderNormal", cpcache.vecLadderNormal);
 		SetEntPropFloat(client, Prop_Send, "m_flStamina", cpcache.fStamina);
 		SetEntProp(client, Prop_Send, "m_bDucked", cpcache.bDucked);
 		SetEntProp(client, Prop_Send, "m_bDucking", cpcache.bDucking);
@@ -2581,7 +2709,6 @@ void LoadCheckpointCache(int client, cp_cache_t cpcache, bool isPersistentData)
 	{
 		SetEntPropFloat(client, Prop_Send, "m_flDucktime", cpcache.fDucktime);
 	}
-
 	else if(gEV_Type == Engine_CSGO)
 	{
 		SetEntPropFloat(client, Prop_Send, "m_flDuckAmount", cpcache.fDucktime);
@@ -2602,10 +2729,10 @@ void LoadCheckpointCache(int client, cp_cache_t cpcache, bool isPersistentData)
 	SetEntPropString(client, Prop_Data, "m_iClassname", cpcache.sClassname);
 
 	TeleportEntity(client, cpcache.fPosition,
-		((gI_CheckpointsSettings[client] & CP_ANGLES)   > 0 || cpcache.bSegmented) ? cpcache.fAngles   : NULL_VECTOR,
-		((gI_CheckpointsSettings[client] & CP_VELOCITY) > 0 || cpcache.bSegmented) ? cpcache.fVelocity : NULL_VECTOR);
+		((gI_CheckpointsSettings[client] & CP_ANGLES)   > 0 || cpcache.bSegmented || isPersistentData) ? cpcache.fAngles   : NULL_VECTOR,
+		((gI_CheckpointsSettings[client] & CP_VELOCITY) > 0 || cpcache.bSegmented || isPersistentData) ? cpcache.fVelocity : NULL_VECTOR);
 
-	if(cpcache.bPractice || !cpcache.bSegmented || GetSteamAccountID(client) != cpcache.iSteamID)
+	if(cpcache.bPractice || !(cpcache.bSegmented || isPersistentData) || GetSteamAccountID(client) != cpcache.iSteamID)
 	{
 		Shavit_SetPracticeMode(client, true, true);
 	}
@@ -2616,19 +2743,12 @@ void LoadCheckpointCache(int client, cp_cache_t cpcache, bool isPersistentData)
 
 	SetEntityGravity(client, cpcache.fGravity);
 
-	if(cpcache.bSegmented && gB_Replay)
+	if(gB_Replay && cpcache.aFrames != null)
 	{
-		if(cpcache.aFrames == null)
-		{
-			LogError("SetReplayData for %L failed, recorded frames are null.", client);
-		}
-		else
-		{
-			// if isPersistentData, then CloneHandle() is done instead of ArrayList.Clone()
-			Shavit_SetReplayData(client, cpcache.aFrames, isPersistentData);
-			Shavit_SetPlayerPreFrame(client, cpcache.iPreFrames);
-			Shavit_SetPlayerTimerFrame(client, cpcache.iTimerPreFrames);
-		}
+		// if isPersistentData, then CloneHandle() is done instead of ArrayList.Clone()
+		Shavit_SetReplayData(client, cpcache.aFrames, isPersistentData);
+		Shavit_SetPlayerPreFrame(client, cpcache.iPreFrames);
+		Shavit_SetPlayerTimerFrame(client, cpcache.iTimerPreFrames);
 	}
 
 	if (gB_Eventqueuefix && cpcache.aEvents != null && cpcache.aOutputWaits != null)
@@ -2651,7 +2771,7 @@ void LoadCheckpointCache(int client, cp_cache_t cpcache, bool isPersistentData)
 	}
 }
 
-bool DeleteCheckpoint(int client, int index, bool force=false, bool eraseIndex=true)
+bool DeleteCheckpoint(int client, int index, bool force=false)
 {
 	if (index < 1 || index > gA_Checkpoints[client].Length)
 	{
@@ -2675,12 +2795,8 @@ bool DeleteCheckpoint(int client, int index, bool force=false, bool eraseIndex=t
 
 	cp_cache_t cpcache;
 	gA_Checkpoints[client].GetArray(index-1, cpcache);
+	gA_Checkpoints[client].Erase(index-1);
 	DeleteCheckpointCache(cpcache);
-
-	if (eraseIndex)
-	{
-		gA_Checkpoints[client].Erase(index-1);
-	}
 
 	return true;
 }
@@ -2924,6 +3040,11 @@ public Action Shavit_OnStart(int client)
 {
 	gI_TimesTeleported[client] = 0;
 
+	if (gB_Eventqueuefix)
+	{
+		SetClientEventsPaused(client, false);
+	}
+
 	if(Shavit_GetStyleSettingInt(gI_Style[client], "prespeed") == 0 && GetEntityMoveType(client) == MOVETYPE_NOCLIP)
 	{
 		return Plugin_Stop;
@@ -3001,39 +3122,24 @@ public void Shavit_OnRestart(int client, int track)
 		return;
 	}
 
-	if(!IsPlayerAlive(client))
+	if(gCV_RespawnOnRestart.BoolValue && !IsPlayerAlive(client))
 	{
 		if(gEV_Type == Engine_TF2)
 		{
-			TF2_ChangeClientTeam(client, view_as<TFTeam>(3));
+			TF2_ChangeClientTeam(client, view_as<TFTeam>(GetRandomInt(2, 3)));
 		}
-		
 		else
 		{
-			if(FindEntityByClassname(-1, "info_player_terrorist") != -1)
-			{
-				CS_SwitchTeam(client, 2);
-			}
-
-			else
-			{
-				CS_SwitchTeam(client, 3);
-			}
+			CS_SwitchTeam(client, GetRandomInt(2, 3));
 		}
 
 		if(gEV_Type == Engine_TF2)
 		{
 			TF2_RespawnPlayer(client);
 		}
-
 		else
 		{
 			CS_RespawnPlayer(client);
-		}
-
-		if(gCV_RespawnOnRestart.BoolValue)
-		{
-			RestartTimer(client, track);
 		}
 	}
 }
@@ -3090,6 +3196,7 @@ public void Player_Spawn(Event event, const char[] name, bool dontBroadcast)
 		{
 			if(gCV_RestoreStates.BoolValue)
 			{
+				// events&outputs won't work properly unless we do this next frame...
 				RequestFrame(LoadPersistentData, serial);
 				bCanStartOnSpawn = false;
 			}
@@ -3102,6 +3209,7 @@ public void Player_Spawn(Event event, const char[] name, bool dontBroadcast)
 			if (iIndex != -1)
 			{
 				gB_SaveStates[client] = true;
+				// events&outputs won't work properly unless we do this next frame...
 				RequestFrame(LoadPersistentData, serial);
 				bCanStartOnSpawn = false;
 			}
@@ -3187,30 +3295,9 @@ public Action Player_Notifications(Event event, const char[] name, bool dontBroa
 		}
 	}
 
-	switch(gCV_RemoveRagdolls.IntValue)
+	if ((gCV_RemoveRagdolls.IntValue == 1 && IsFakeClient(client)) || gCV_RemoveRagdolls.IntValue == 2)
 	{
-		case 0:
-		{
-			return Plugin_Continue;
-		}
-
-		case 1:
-		{
-			if(IsFakeClient(client))
-			{
-				RemoveRagdoll(client);
-			}
-		}
-
-		case 2:
-		{
-			RemoveRagdoll(client);
-		}
-
-		default:
-		{
-			return Plugin_Continue;
-		}
+		RemoveRagdoll(client);
 	}
 
 	return Plugin_Continue;
@@ -3540,7 +3627,7 @@ public any Native_SetCheckpoint(Handle plugin, int numParams)
 		position = gI_CurrentCheckpoint[client];
 	}
 
-	DeleteCheckpoint(client, position, true, true);
+	DeleteCheckpoint(client, position, true);
 	gA_Checkpoints[client].SetArray(position-1, cpcache);
 	
 	return true;

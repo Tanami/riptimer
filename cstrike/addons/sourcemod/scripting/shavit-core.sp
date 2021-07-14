@@ -278,7 +278,7 @@ public void OnPluginStart()
 	gH_Forwards_OnTrackChanged = CreateGlobalForward("Shavit_OnTrackChanged", ET_Event, Param_Cell, Param_Cell, Param_Cell);
 	gH_Forwards_OnStyleConfigLoaded = CreateGlobalForward("Shavit_OnStyleConfigLoaded", ET_Event, Param_Cell);
 	gH_Forwards_OnDatabaseLoaded = CreateGlobalForward("Shavit_OnDatabaseLoaded", ET_Event);
-	gH_Forwards_OnChatConfigLoaded = CreateGlobalForward("Shavit_OnChatConfigLoaded", ET_Event, Param_Array);
+	gH_Forwards_OnChatConfigLoaded = CreateGlobalForward("Shavit_OnChatConfigLoaded", ET_Event);
 	gH_Forwards_OnUserCmdPre = CreateGlobalForward("Shavit_OnUserCmdPre", ET_Event, Param_Cell, Param_CellByRef, Param_CellByRef, Param_Array, Param_Array, Param_Cell, Param_Cell, Param_Cell, Param_Array, Param_Array);
 	gH_Forwards_OnTimerIncrement = CreateGlobalForward("Shavit_OnTimeIncrement", ET_Event, Param_Cell, Param_Array, Param_CellByRef, Param_Array);
 	gH_Forwards_OnTimerIncrementPost = CreateGlobalForward("Shavit_OnTimeIncrementPost", ET_Event, Param_Cell, Param_Cell, Param_Array);
@@ -945,19 +945,16 @@ public Action Command_WipePlayer(int client, int args)
 
 	if(strlen(gS_Verification[client]) == 0 || !StrEqual(sArgString, gS_Verification[client]))
 	{
-		ReplaceString(sArgString, 32, "[U:1:", "");
-		ReplaceString(sArgString, 32, "]", "");
-
-		gI_WipePlayerID[client] = StringToInt(sArgString);
+		gI_WipePlayerID[client] = SteamIDToAuth(sArgString);
 
 		if(gI_WipePlayerID[client] <= 0)
 		{
-			Shavit_PrintToChat(client, "Entered SteamID ([U:1:%s]) is invalid. The range for valid SteamIDs is [U:1:1] to [U:1:2147483647].", sArgString);
+			Shavit_PrintToChat(client, "Entered SteamID (%s) is invalid. The range for valid SteamIDs is [U:1:1] to [U:1:2147483647].", sArgString);
 
 			return Plugin_Handled;
 		}
 
-		char sAlphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#";
+		char sAlphabet[] = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#";
 		strcopy(gS_Verification[client], 8, "");
 
 		for(int i = 0; i < 5; i++)
@@ -1641,11 +1638,11 @@ public int Native_FinishMap(Handle handler, int numParams)
 		#if DEBUG
 		if(gCV_DebugOffsets.BoolValue)
 		{
-			char sOffsetMessage[64];
+			char sOffsetMessage[100];
 			char sOffsetDistance[8];
 			FormatEx(sOffsetDistance, 8, "%.1f", gA_Timers[client].fDistanceOffset[Zone_End]);
-			FormatEx(sOffsetMessage, 64, "[END]%T", "DebugOffsets", client, gA_Timers[client].fTimeOffset[Zone_End], sOffsetDistance);
-			PrintToConsole(client, "%s", sOffsetMessage);
+			FormatEx(sOffsetMessage, sizeof(sOffsetMessage), "[END]%T %d", "DebugOffsets", client, gA_Timers[client].fTimeOffset[Zone_End], sOffsetDistance, gA_Timers[client].iZoneIncrement);
+			PrintToChat(client, "%s", sOffsetMessage);
 		}
 		#endif
 	}
@@ -1809,7 +1806,7 @@ public int SemiNative_PrintToChat(int client, int formatParam)
 
 	if (gCV_TimeInMessages.BoolValue)
 	{
-		FormatTime(sTime, sizeof(sTime), "%H:%M:%S ");
+		FormatTime(sTime, sizeof(sTime), gB_Protobuf ? "%H:%M:%S " : "\x01%H:%M:%S ");
 	}
 
 	// space before message needed show colors in cs:go
@@ -2068,7 +2065,7 @@ public int Native_LoadSnapshot(Handle handler, int numParams)
 	}
 
 	gA_Timers[client].bEnabled = snapshot.bTimerEnabled;
-	gA_Timers[client].bPaused = snapshot.bClientPaused;
+	gA_Timers[client].bPaused = snapshot.bClientPaused && snapshot.bTimerEnabled;
 	gA_Timers[client].iJumps = snapshot.iJumps;
 	gA_Timers[client].iStyle = snapshot.bsStyle;
 	gA_Timers[client].iStrafes = snapshot.iStrafes;
@@ -2593,6 +2590,14 @@ bool LoadStyles()
 	parser.ParseFile(sPath);
 	delete parser;
 
+	for (int i = 0; i < gI_Styles; i++)
+	{
+		if (gSM_StyleKeys[i] == null)
+		{
+			SetFailState("Missing style index %d. Highest index is %d. Fix addons/sourcemod/configs/shavit-styles.cfg", i, gI_Styles-1);
+		}
+	}
+
 	gB_Registered = true;
 
 	SortCustom1D(gI_OrderedStyles, gI_Styles, SortAscending_StyleOrder);
@@ -2614,12 +2619,21 @@ public SMCResult OnStyleEnterSection(SMCParser smc, const char[] name, bool opt_
 
 	gI_CurrentParserIndex = StringToInt(name);
 
+	if (gSM_StyleKeys[gI_CurrentParserIndex] != null)
+	{
+		SetFailState("Style index %d (%s) already parsed. Stop using the same index for multiple styles. Fix addons/sourcemod/configs/shavit-styles.cfg", gI_CurrentParserIndex, name);
+	}
+
+	if (gI_CurrentParserIndex >= STYLE_LIMIT)
+	{
+		SetFailState("Style index %d (%s) too high (limit %d). Fix addons/sourcemod/configs/shavit-styles.cfg", gI_CurrentParserIndex, name, STYLE_LIMIT);
+	}
+
 	if(gI_Styles <= gI_CurrentParserIndex)
 	{
 		gI_Styles = gI_CurrentParserIndex + 1;
 	}
 
-	delete gSM_StyleKeys[gI_CurrentParserIndex];
 	gSM_StyleKeys[gI_CurrentParserIndex] = new StringMap();
 
 	gSM_StyleKeys[gI_CurrentParserIndex].SetString("name", "<MISSING STYLE NAME>");
@@ -2866,7 +2880,6 @@ bool LoadMessages()
 	ReplaceColors(gS_ChatStrings.sStyle, sizeof(chatstrings_t::sStyle));
 
 	Call_StartForward(gH_Forwards_OnChatConfigLoaded);
-	Call_PushArray(gS_ChatStrings, sizeof(gS_ChatStrings));
 	Call_Finish();
 
 	return true;
@@ -2952,6 +2965,7 @@ void ApplyMigration(int migration)
 		case Migration_AddZonesFlagsAndData: ApplyMigration_AddZonesFlagsAndData();
 		case Migration_AddPlayertimesCompletions: ApplyMigration_AddPlayertimesCompletions();
 		case Migration_AddCustomChatAccess: ApplyMigration_AddCustomChatAccess();
+		case Migration_AddPlayertimesExactTimeInt: ApplyMigration_AddPlayertimesExactTimeInt();
 	}
 }
 
@@ -2995,6 +3009,13 @@ void ApplyMigration_AddCustomChatAccess()
 	char sQuery[192];
 	FormatEx(sQuery, 192, "ALTER TABLE `%schat` ADD COLUMN `ccaccess` INT NOT NULL DEFAULT 0 AFTER `ccmessage`;", gS_MySQLPrefix);
 	gH_SQL.Query(SQL_TableMigrationSingleQuery_Callback, sQuery, Migration_AddCustomChatAccess, DBPrio_High);
+}
+
+void ApplyMigration_AddPlayertimesExactTimeInt()
+{
+	char sQuery[192];
+	FormatEx(sQuery, 192, "ALTER TABLE `%splayertimes` ADD COLUMN `exact_time_int` INT NOT NULL DEFAULT 0 AFTER `completions`;", gS_MySQLPrefix);
+	gH_SQL.Query(SQL_TableMigrationSingleQuery_Callback, sQuery, Migration_AddPlayertimesExactTimeInt, DBPrio_High);
 }
 
 public void SQL_TableMigrationSingleQuery_Callback(Database db, DBResultSet results, const char[] error, any data)
@@ -3324,11 +3345,11 @@ public void PostThinkPost(int client)
 		#if DEBUG
 		if(gCV_DebugOffsets.BoolValue)
 		{
-			char sOffsetMessage[64];
+			char sOffsetMessage[100];
 			char sOffsetDistance[8];
 			FormatEx(sOffsetDistance, 8, "%.1f", gA_Timers[client].fDistanceOffset[Zone_Start]);
-			FormatEx(sOffsetMessage, 64, "[START]%T", "DebugOffsets", client, gA_Timers[client].fTimeOffset[Zone_Start], sOffsetDistance);
-			PrintToConsole(client, "%s", sOffsetMessage);
+			FormatEx(sOffsetMessage, sizeof(sOffsetMessage), "[START]%T", "DebugOffsets", client, gA_Timers[client].fTimeOffset[Zone_Start], sOffsetDistance);
+			PrintToChat(client, "%s", sOffsetMessage);
 		}
 		#endif
 	}
@@ -3720,10 +3741,10 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 				bool bSHSW = (GetStyleSettingInt(gA_Timers[client].iStyle, "force_hsw") == 2) && !bInStart; // don't decide on the first valid input until out of start zone!
 				int iCombination = -1;
 
-				bool bForward = ((buttons & IN_FORWARD) > 0 && vel[0] >= 100.0);
-				bool bMoveLeft = ((buttons & IN_MOVELEFT) > 0 && vel[1] <= -100.0);
-				bool bBack = ((buttons & IN_BACK) > 0 && vel[0] <= -100.0);
-				bool bMoveRight = ((buttons & IN_MOVERIGHT) > 0 && vel[1] >= 100.0);
+				bool bForward = ((buttons & IN_FORWARD) > 0 && vel[0] > 0.0);
+				bool bMoveLeft = ((buttons & IN_MOVELEFT) > 0 && vel[1] < 0.0);
+				bool bBack = ((buttons & IN_BACK) > 0 && vel[0] < 0.0);
+				bool bMoveRight = ((buttons & IN_MOVERIGHT) > 0 && vel[1] > 0.0);
 
 				if(bSHSW)
 				{
@@ -3731,7 +3752,6 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 					{
 						iCombination = 0;
 					}
-
 					else if((bForward && bMoveRight || bBack && bMoveLeft))
 					{
 						iCombination = 1;
@@ -3760,7 +3780,6 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 						buttons &= ~IN_BACK;
 					}
 				}
-
 				else
 				{
 					if(bBack && (bMoveLeft || bMoveRight))

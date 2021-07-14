@@ -23,7 +23,7 @@
 #endif
 #define _shavit_included
 
-#define SHAVIT_VERSION "2.7.0"
+#define SHAVIT_VERSION "3.0.0"
 #define STYLE_LIMIT 256
 #define MAX_ZONES 64
 #define MAX_STAGES 51 // 😐 kind of arbitrary but also some space between this and MAX_ZONES
@@ -93,6 +93,7 @@ enum
 	Migration_AddZonesFlagsAndData,
 	Migration_AddPlayertimesCompletions,
 	Migration_AddCustomChatAccess,
+	Migration_AddPlayertimesExactTimeInt,
 	MIGRATIONS_END
 };
 
@@ -214,7 +215,7 @@ enum struct cp_cache_t
 	int iSteamID;
 	ArrayList aEvents;
 	ArrayList aOutputWaits;
-	float fLadderNormal[3];
+	float vecLadderNormal[3];
 }
 
 enum struct frame_t
@@ -225,8 +226,10 @@ enum struct frame_t
 	// iReplayVersion >= 0x02
 	int flags;
 	MoveType mt;
-	// iReplayVersion >= 0x05... maybe
-	//float vel[3];
+	// Everything below is generally NOT loaded into memory for playback
+	// iReplayVersion >= 0x06
+	int mousexy; // `mousex | (mousey << 16)` // unpack with UnpackSignedShorts
+	int vel; // basically `forwardmove | (sidemove << 16)` // unpack with UnpackSignedShorts
 }
 
 enum struct framecache_t
@@ -308,7 +311,6 @@ stock Database GetTimerDatabaseHandle()
 			SetFailState("Timer startup failed. Reason: %s", sError);
 		}
 	}
-
 	else
 	{
 		db = SQLite_UseDatabase("shavit", sError, 255);
@@ -377,6 +379,45 @@ stock int IPStringToAddress(const char[] ip)
 			StringToInt(sExplodedAddress[3]);
 
 	return iIPAddress;
+}
+
+// Retrieves authid from STEAM_X:Y:Z and [U:1:123]
+stock int SteamIDToAuth(const char[] sInput)
+{
+	char sSteamID[32];
+	strcopy(sSteamID, sizeof(sSteamID), sInput);
+	ReplaceString(sSteamID, 32, "\"", "");
+
+	if (StrContains(sSteamID, "STEAM_") != -1)
+	{
+		ReplaceString(sSteamID, 32, "STEAM_", "");
+
+		char parts[3][11];
+		ExplodeString(sSteamID, ":", parts, 3, 11);
+
+		// Let X, Y and Z constants be defined by the SteamID: STEAM_X:Y:Z.
+		// Using the formula W=Z*2+Y, a SteamID can be converted:
+		return StringToInt(parts[2]) * 2 + StringToInt(parts[1]);
+	}
+	else if (StrContains(sSteamID, "U:1:") != -1)
+	{
+		ReplaceString(sSteamID, 32, "[", "");
+		ReplaceString(sSteamID, 32, "U:1:", "");
+		ReplaceString(sSteamID, 32, "]", "");
+
+		return StringToInt(sSteamID);
+	}
+
+	return StringToInt(sSteamID);
+}
+
+// Can be used to unpack frame_t.mousexy and frame_t.vel
+stock void UnpackSignedShorts(int x, int out[2])
+{
+	int a = (x & 0x0000FFFF);
+	out[0] = (a & 0x8000) ? (a | 0xFFFF0000) : a;
+	int b = (x & 0xFFFF0000) >> 16;
+	out[1] = (b & 0x8000) ? (b | 0xFFFF0000) : b;
 }
 
 // time formatting!
@@ -723,10 +764,9 @@ forward void Shavit_OnDatabaseLoaded();
 /**
  * Called when the chat messages configuration finishes loading and it's ready to load everything into the cache.
  *
- * @param strings                   The chat strings
  * @noreturn
  */
-forward void Shavit_OnChatConfigLoaded(chatstrings_t strings);
+forward void Shavit_OnChatConfigLoaded();
 
 /**
  * Called when a player teleports with checkpoints.
@@ -1219,7 +1259,7 @@ native float Shavit_GetStageWR(int track, int style, int stage);
  * @param stage                     Stage number.
  * @return                          The stage time of the PB run. Can be 0.0 if the PB run didn't hit the stage or if the stage doesn't exist.
  */
-native float Shavit_GetStagePB(int client, int track, int style, int stage);
+//native float Shavit_GetStagePB(int client, int track, int style, int stage);
 
 //native float Shavit_GetStageWRCP(int track, int style, int stage);
 //native float Shavit_GetStagePBCP(int client, int track, int style, int stage);
@@ -1461,11 +1501,11 @@ native float Shavit_GetReplayBotFirstFrame(int entity);
 /**
  * Retrieve the replay bot's entity index.
  *
- * @param track						Trakc you want. -1 if you want the central bot. If no central bot, the first bot it finds it used.
  * @param style						Style you want. -1 if you want the central bot. If no central bot, the first bot it finds it used.
+ * @param track						Track you want. -1 if you want the central bot. If no central bot, the first bot it finds it used.
  * @return							Client index for the replay bot. -1 if not found.
  */
-native int Shavit_GetReplayBotIndex(int track, int style);
+native int Shavit_GetReplayBotIndex(int style, int track);
 
 /**
  * Retrieve the style being played by the replay bot.
@@ -1525,21 +1565,56 @@ native int Shavit_GetReplayButtons(int ent);
 native int Shavit_GetReplayFrameCount(int style, int track);
 
 /**
- * Retrieves a replay bot's frame count.
+ * Retrieves a replay's pre-run frame count.
+ *
+ * @param style						Style.
+ * @param track						Track.
+ * @return							Frame count.
+ */
+native int Shavit_GetReplayPreFrame(int style, int track);
+
+/**
+ * Retrieves a replay's post-run frame count.
+ *
+ * @param style						Style.
+ * @param track						Track.
+ * @return							Frame count.
+ */
+native int Shavit_GetReplayPostFrame(int style, int track);
+
+/**
+ * Retrieves the frame count from the currently running replay bot's framecache_t.
  *
  * @param bot						Replay bot entity.
  * @return							Frame count.
  */
-native int Shavit_GetReplayBotFrameCount(int bot);
+native int Shavit_GetReplayCacheFrameCount(int bot);
+
+/**
+ * Retrieves the pre-run frame count from the currently running replay bot's framecache_t.
+ *
+ * @param bot						Replay bot entity.
+ * @return							Frame count.
+ */
+native int Shavit_GetReplayCachePreFrame(int bot);
+
+/**
+ * Retrieves the post-run frame count from the currently running replay bot's framecache_t.
+ *
+ * @param bot						Replay bot entity.
+ * @return							Frame count.
+ */
+native int Shavit_GetReplayCachePostFrame(int bot);
 
 /**
  * Retrieves the replay data for the given style and track.
  *
  * @param style						Style.
  * @param track						Track.
+ * @param cheapCloneHandle			False means we duplicate the frames (ArrayList.Clone). True means we clone the handle to the frames (CloneHandle).
  * @return							ArrayList with proper replay data, or null if there is no recorded data.
  */
-native ArrayList Shavit_GetReplayFrames(int style, int track);
+native ArrayList Shavit_GetReplayFrames(int style, int track, bool cheapCloneHandle=false);
 
 /**
  * Retrieves a client's frame count.
@@ -1559,12 +1634,12 @@ native int Shavit_GetClientFrameCount(int client);
 native float Shavit_GetReplayLength(int style, int track);
 
 /**
- * Retrieves a replay bot's total length in seconds.
+ * Retrieves the replay's total length in seconds from the currently running replay bot's framecache_t.
  *
  * @param bot						Replay bot entity.
  * @return							Replay length.
  */
-native float Shavit_GetReplayBotLength(int bot);
+native float Shavit_GetReplayCacheLength(int bot);
 
 /**
  * Retrieves an actively playing replay's time.
@@ -1887,20 +1962,20 @@ native void Shavit_LoadSnapshot(int client, any[] snapshot, int size = sizeof(ti
  *
  * @param client					Client index.
  * @param data						ArrayList with proper replay data.
- * @param cloneHandle				False means we duplicate the frames (ArrayList.Clone). True means we just clone the handle to the frames (CloneHandle).
+ * @param cheapCloneHandle			False means we duplicate the frames (ArrayList.Clone). True means we clone the handle to the frames (CloneHandle).
  * @noreturn
  */
-native void Shavit_SetReplayData(int client, ArrayList data, bool cloneHandle=false);
+native void Shavit_SetReplayData(int client, ArrayList data, bool cheapCloneHandle=false);
 
 /**
  * Saves a player's replay recording frames (if exists) into an ArrayList.
  * To be used by save states/TAS etc.
  *
  * @param client					Client index.
- * @param cloneHandle				False means we duplicate the frames (Arraylist.Clone). True means we just cloen the handle to the frames (CloneHandle). This is going to be used for peristent-data in shavit-misc so we don't duplicate buffers needlessly.
+ * @param cheapCloneHandle			False means we duplicate the frames (Arraylist.Clone). True means we clone the handle to the frames (CloneHandle). This is going to be used for peristent-data in shavit-misc so we don't allocate duplicate memory needlessly.
  * @return							ArrayList with proper replay data, or null if the player has no recorded data.
  */
-native ArrayList Shavit_GetReplayData(int client, bool cloneHandle=false);
+native ArrayList Shavit_GetReplayData(int client, bool cheapCloneHandle=false);
 
 /**
  * Checks if the given entity is a replay bot (fakeclient) or replay prop.
@@ -2477,11 +2552,16 @@ public void __pl_shavit_SetNTVOptional()
 	MarkNativeAsOptional("Shavit_GetReplayButtons");
 	MarkNativeAsOptional("Shavit_GetClosestReplayStyle");
 	MarkNativeAsOptional("Shavit_SetClosestReplayStyle");
-	MarkNativeAsOptional("Shavit_GetReplayBotFrameCount");
+	MarkNativeAsOptional("Shavit_GetReplayCacheFrameCount");
+	MarkNativeAsOptional("Shavit_GetReplayCacheLength");
 	MarkNativeAsOptional("Shavit_StartReplayFromFrameCache");
 	MarkNativeAsOptional("Shavit_StartReplayFromFile");
 	MarkNativeAsOptional("Shavit_GetClientLastStage");
 	MarkNativeAsOptional("Shavit_GetStageWR");
 	MarkNativeAsOptional("Shavit_GetStagePB");
+	MarkNativeAsOptional("Shavit_GetReplayPreFrame");
+	MarkNativeAsOptional("Shavit_GetReplayPostFrame");
+	MarkNativeAsOptional("Shavit_GetReplayCachePreFrame");
+	MarkNativeAsOptional("Shavit_GetReplayCachePostFrame");
 }
 #endif

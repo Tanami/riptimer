@@ -22,6 +22,7 @@
 #include <sdktools>
 #include <sdkhooks>
 #include <convar_class>
+#include <dhooks>
 
 #undef REQUIRE_PLUGIN
 #include <shavit>
@@ -242,6 +243,8 @@ public void OnPluginStart()
 	RegAdminCmd("sm_modifyzone", Command_ZoneEdit, ADMFLAG_RCON, "Modify an existing zone. Alias of sm_zoneedit.");
 	
 	RegAdminCmd("sm_reloadzonesettings", Command_ReloadZoneSettings, ADMFLAG_ROOT, "Reloads the zone settings.");
+
+	RegAdminCmd("sm_loadunzonedmap", Command_LoadUnzonedMap, ADMFLAG_ROOT, "Loads the next map from the maps folder that is unzoned.");
 
 	RegConsoleCmd("sm_stages", Command_Stages, "Opens the stage menu. Usage: sm_stages [stage #]");
 	RegConsoleCmd("sm_stage", Command_Stages, "Opens the stage menu. Usage: sm_stage [stage #]");
@@ -796,9 +799,8 @@ public void OnMapStart()
 
 	if(gB_Late)
 	{
-		chatstrings_t chatstrings;
-		Shavit_GetChatStringsStruct(chatstrings);
-		Shavit_OnChatConfigLoaded(chatstrings);
+		gB_Late = false;
+		Shavit_OnChatConfigLoaded();
 	}
 
 	for(int i = 1; i <= MaxClients; i++)
@@ -813,7 +815,7 @@ public void OnMapStart()
 public void LoadStageZones()
 {
 	char sQuery[256];
-	FormatEx(sQuery, 256, "SELECT id, data, track FROM mapzones WHERE type = %i and map = '%s'", Zone_Stage, gS_Map);
+	FormatEx(sQuery, 256, "SELECT id, data, track FROM %smapzones WHERE type = %i and map = '%s'", gS_MySQLPrefix, Zone_Stage, gS_Map);
 	gH_SQL.Query(SQL_GetStageZone_Callback, sQuery,0, DBPrio_High);
 }
 
@@ -866,7 +868,7 @@ public void OnEntityDestroyed(int entity)
 {
 	if (entity > MaxClients && entity < 4096 && gI_EntityZone[entity] > -1)
 	{
-		KillZoneEntity(gI_EntityZone[entity]);
+		KillZoneEntity(gI_EntityZone[entity], false);
 	}
 }
 
@@ -926,9 +928,27 @@ public void Frame_HookTrigger(any data)
 	char sName[32];
 	GetEntPropString(entity, Prop_Data, "m_iName", sName, 32);
 
+	// Please follow this naming scheme for this zones https://github.com/3331/fly#trigger_multiple
+	// mod_zone_start
+	// mod_zone_end
+	// mod_zone_checkpoint_X
+	// mod_zone_bonus_X_start
+	// mod_zone_bonus_X_end
+	// mod_zone_bonus_X_checkpoint_X
+
 	if(StrContains(sName, "mod_zone_") == -1)
 	{
 		return;
+	}
+
+	// Normalize some zone names that bhop_somp_island and bhop_overthinker use
+	if (StrEqual(sName, "mod_zone_start_bonus") || StrEqual(sName, "mod_zone_bonus_start"))
+	{
+		sName = "mod_zone_bonus_1_start";
+	}
+	else if (StrEqual(sName, "mod_zone_end_bonus") || StrEqual(sName, "mod_zone_bonus_end"))
+	{
+		sName = "mod_zone_bonus_1_end";
 	}
 
 	int zone = -1;
@@ -939,7 +959,6 @@ public void Frame_HookTrigger(any data)
 	{
 		zone = Zone_Start;
 	}
-
 	else if(StrContains(sName, "end") != -1)
 	{
 		zone = Zone_End;
@@ -956,21 +975,12 @@ public void Frame_HookTrigger(any data)
 		{
 			iCheckpointIndex = 5; // mod_zone_bonus_X_checkpoint_X
 
-			// check for BAD BAD BAD WRONG entities named "mod_zone_bonus_start" or "mod_zone_bonus_end" (bhop_somp_island does this)
-			if (StrEqual(sections[3], "start") || StrEqual(sections[3], "end") || StrEqual(sections[3], "checkpoint"))
-			{
-				track = Track_Bonus;
-				iCheckpointIndex = 4; // mod_zone_bonus_checkpoint_X
-			}
-			else
-			{
-				track = StringToInt(sections[3]); // 0 on failure to parse. 0 is less than Track_Bonus
+			track = StringToInt(sections[3]); // 0 on failure to parse. 0 is less than Track_Bonus
 
-				if (track < Track_Bonus || track > Track_Bonus_Last)
-				{
-					LogError("invalid track in prebuilt map zone (%s) on %s", sName, gS_Map);
-					return;
-				}
+			if (track < Track_Bonus || track > Track_Bonus_Last)
+			{
+				LogError("invalid track in prebuilt map zone (%s) on %s", sName, gS_Map);
+				return;
 			}
 		}
 
@@ -979,8 +989,7 @@ public void Frame_HookTrigger(any data)
 			zone = Zone_Stage;
 			zonedata = StringToInt(sections[iCheckpointIndex]);
 
-			// TODO stop hardcoding stage number limit
-			if (zonedata <= 0 || zonedata > 40)
+			if (zonedata <= 0 || zonedata > MAX_STAGES)
 			{
 				LogError("invalid stage number in prebuilt map zone (%s) on %s", sName, gS_Map);
 				return;
@@ -1027,9 +1036,9 @@ public void Frame_HookTrigger(any data)
 	}
 }
 
-public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
+public void Shavit_OnChatConfigLoaded()
 {
-	gS_ChatStrings = strings;
+	Shavit_GetChatStringsStruct(gS_ChatStrings);
 }
 
 void ClearZone(int index)
@@ -1059,12 +1068,15 @@ void UnhookEntity(int entity)
 	SDKUnhook(entity, SDKHook_TouchPost, TouchPost);
 }
 
-void KillZoneEntity(int index)
+void KillZoneEntity(int index, bool kill=true)
 {
 	int entity = gA_ZoneCache[index].iEntityID;
 	
 	if(entity > MaxClients)
 	{
+		gA_ZoneCache[index].iEntityID = -1;
+		gI_EntityZone[entity] = -1;
+
 		for(int i = 1; i <= MaxClients; i++)
 		{
 			for(int j = 0; j < TRACKS_SIZE; j++)
@@ -1075,8 +1087,6 @@ void KillZoneEntity(int index)
 			gB_InsideZoneID[i][index] = false;
 		}
 
-		gI_EntityZone[gA_ZoneCache[index].iEntityID] = -1;
-
 		if (!IsValidEntity(entity))
 		{
 			return;
@@ -1084,7 +1094,7 @@ void KillZoneEntity(int index)
 
 		UnhookEntity(entity);
 
-		if (!gA_ZoneCache[index].bPrebuilt)
+		if (kill && !gA_ZoneCache[index].bPrebuilt)
 		{
 			AcceptEntityInput(entity, "Kill");
 		}
@@ -1094,12 +1104,7 @@ void KillZoneEntity(int index)
 // 0 - all zones
 void UnloadZones(int zone)
 {
-	if(zone == Zone_CustomSpawn)
-	{
-		ClearCustomSpawn(-1);
-	}
-
-	else
+	if (zone != Zone_CustomSpawn)
 	{
 		for(int i = 0; i < MAX_ZONES; i++)
 		{
@@ -1109,9 +1114,9 @@ void UnloadZones(int zone)
 				ClearZone(i);
 			}
 		}
-
-		ClearCustomSpawn(-1);
 	}
+
+	ClearCustomSpawn(-1);
 }
 
 void RefreshZones()
@@ -1233,6 +1238,11 @@ public void OnClientPutInServer(int client)
 	}
 
 	Reset(client);
+
+	gF_Modifier[client] = 16.0;
+	gI_GridSnap[client] = 16;
+	gB_SnapToWall[client] = false;
+	gB_CursorTracing[client] = true;
 }
 
 void GetStartPosition(int client)
@@ -1630,6 +1640,98 @@ public Action Command_ReloadZoneSettings(int client, int args)
 	LoadZoneSettings();
 
 	ReplyToCommand(client, "Reloaded zone settings.");
+
+	return Plugin_Handled;
+}
+
+bool FindUnzonedMap(char out[PLATFORM_MAX_PATH])
+{
+	StringMap mapList = new StringMap();
+	DirectoryListing dir = OpenDirectory("maps");
+
+	if (dir == null)
+	{
+		return false;
+	}
+
+	char buffer[PLATFORM_MAX_PATH];
+	FileType type;
+
+	while (dir.GetNext(buffer, sizeof(buffer), type))
+	{
+		if (type != FileType_File)
+		{
+			continue;
+		}
+
+		int length = strlen(buffer);
+
+		if (length < 5 || buffer[length-4] != '.') // a.bsp
+		{
+			continue;
+		}
+
+		if (buffer[length-3] == 'b' && buffer[length-2] == 's' && buffer[length-1] == 'p')
+		{
+			buffer[length-4] = 0;
+			mapList.SetValue(buffer, false, false); // note: false for 'replace'
+		}
+	}
+
+	delete dir;
+
+	char sQuery[256];
+	FormatEx(sQuery, sizeof(sQuery), "SELECT DISTINCT map FROM %smapzones;", gS_MySQLPrefix);
+
+	DBResultSet results = SQL_Query(gH_SQL, sQuery);
+
+	if (results == INVALID_HANDLE)
+	{
+		delete mapList;
+		return false;
+	}
+
+	while (results.FetchRow())
+	{
+		results.FetchString(0, buffer, sizeof(buffer));
+		mapList.SetValue(buffer, true, true);
+	}
+
+	delete results;
+
+	StringMapSnapshot snapshot = mapList.Snapshot();
+	bool foundMap = false;
+
+	for (int i = 0; i < snapshot.Length; i++)
+	{
+		snapshot.GetKey(i, buffer, sizeof(buffer));
+
+		bool hasZones = false;
+		mapList.GetValue(buffer, hasZones);
+
+		if (!hasZones && !StrEqual(gS_Map, buffer, false))
+		{
+			out = buffer;
+			foundMap = true;
+			break;
+		}
+	}
+
+	delete snapshot;
+	delete mapList;
+
+	return foundMap;
+}
+
+public Action Command_LoadUnzonedMap(int client, int args)
+{
+	char map[PLATFORM_MAX_PATH];
+
+	if (FindUnzonedMap(map))
+	{
+		Shavit_PrintToChatAll("Loading unzoned map %s", map);
+		ForceChangeLevel(map, "sm_loadunzonedmap");
+	}
 
 	return Plugin_Handled;
 }
@@ -2156,11 +2258,7 @@ public int MenuHandler_SelectZoneType(Menu menu, MenuAction action, int param1, 
 void Reset(int client)
 {
 	gI_ZoneTrack[client] = Track_Main;
-	gF_Modifier[client] = 16.0;
 	gI_MapStep[client] = 0;
-	gI_GridSnap[client] = 16;
-	gB_SnapToWall[client] = false;
-	gB_CursorTracing[client] = true;
 	gI_ZoneFlags[client] = 0;
 	gI_ZoneData[client] = 0;
 	gI_ZoneDatabaseID[client] = -1;
@@ -3208,7 +3306,6 @@ public void Round_Start(Event event, const char[] name, bool dontBroadcast)
 		}
 	}
 
-	gI_MapZones = 0;
 	RequestFrame(CreateZoneEntities);
 }
 
@@ -3244,8 +3341,6 @@ public void CreateZoneEntities()
 		if(gA_ZoneCache[i].iEntityID != -1)
 		{
 			KillZoneEntity(i);
-
-			gA_ZoneCache[i].iEntityID = -1;
 		}
 
 		if(!gA_ZoneCache[i].bZoneInitialized)

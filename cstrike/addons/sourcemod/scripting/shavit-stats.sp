@@ -21,6 +21,7 @@
 #include <sourcemod>
 #include <geoip>
 #include <convar_class>
+#include <dhooks>
 
 #undef REQUIRE_PLUGIN
 #include <shavit>
@@ -91,8 +92,9 @@ public void OnAllPluginsLoaded()
 public void OnPluginStart()
 {
 	// player commands
+	RegConsoleCmd("sm_p", Command_Profile, "Show the player's profile. Usage: sm_p [target]");
 	RegConsoleCmd("sm_profile", Command_Profile, "Show the player's profile. Usage: sm_profile [target]");
-	RegConsoleCmd("sm_stats", Command_Profile, "Show the player's profile. Usage: sm_profile [target]");
+	RegConsoleCmd("sm_stats", Command_Profile, "Show the player's profile. Usage: sm_stats [target]");
 	RegConsoleCmd("sm_mapsdone", Command_MapsDoneLeft, "Show maps that the player has finished. Usage: sm_mapsdone [target]");
 	RegConsoleCmd("sm_mapsleft", Command_MapsDoneLeft, "Show maps that the player has not finished yet. Usage: sm_mapsleft [target]");
 
@@ -127,10 +129,9 @@ public void OnMapStart()
 {
 	if(gB_Late)
 	{
+		gB_Late = false;
 		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
-		chatstrings_t chatstrings;
-		Shavit_GetChatStringsStruct(chatstrings);
-		Shavit_OnChatConfigLoaded(chatstrings);
+		Shavit_OnChatConfigLoaded();
 	}
 }
 
@@ -144,9 +145,9 @@ public void Shavit_OnStyleConfigLoaded(int styles)
 	gI_Styles = styles;
 }
 
-public void Shavit_OnChatConfigLoaded(chatstrings_t strings)
+public void Shavit_OnChatConfigLoaded()
 {
-	gS_ChatStrings = strings;
+	Shavit_GetChatStringsStruct(gS_ChatStrings);
 }
 
 public void OnClientPutInServer(int client)
