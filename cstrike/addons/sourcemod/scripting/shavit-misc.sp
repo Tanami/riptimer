@@ -234,10 +234,10 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_goto", Command_Teleport, "Teleport to another player. Usage: sm_goto [target]");
 
 	// weapons
-    RegConsoleCmd("sm_usp", Command_Weapon, "Spawn a USP.");
-    RegConsoleCmd("sm_glock", Command_Weapon, "Spawn a Glock.");
-    RegConsoleCmd("sm_knife", Command_Weapon, "Spawn a knife.");
-    RegConsoleCmd("sm_deagle", Command_Weapon, "Spawn a Desert Eagle.")
+    	RegConsoleCmd("sm_usp", Command_Weapon, "Spawn a USP.");
+    	RegConsoleCmd("sm_glock", Command_Weapon, "Spawn a Glock.");
+    	RegConsoleCmd("sm_knife", Command_Weapon, "Spawn a knife.");
+    	RegConsoleCmd("sm_deagle", Command_Weapon, "Spawn a Desert Eagle.")
 
 	// checkpoints
 	RegConsoleCmd("sm_cpmenu", Command_Checkpoints, "Opens the checkpoints menu.");
@@ -1788,7 +1788,7 @@ public Action Command_Weapon(int client, int args)
 		strcopy(sWeapon, 32, "weapon_deagle");
 	}
 
-    else
+    	else
 	{
 		strcopy(sWeapon, 32, "weapon_knife");
 		iSlot = CS_SLOT_KNIFE;
