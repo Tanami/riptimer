@@ -233,6 +233,7 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_usp", Command_Weapon, "Spawn a USP.");
 	RegConsoleCmd("sm_glock", Command_Weapon, "Spawn a Glock.");
 	RegConsoleCmd("sm_knife", Command_Weapon, "Spawn a knife.");
+	RegConsoleCmd("sm_deagle", Command_Weapon, "Spawn a Desert Eagle.")
 
 	// checkpoints
 	RegConsoleCmd("sm_cpmenu", Command_Checkpoints, "Opens the checkpoints menu.");
@@ -304,7 +305,7 @@ public void OnPluginStart()
 	gCV_CreateSpawnPoints = new Convar("shavit_misc_createspawnpoints", "6", "Amount of spawn points to add for each team.\n0 - Disabled", 0, true, 0.0, true, 32.0);
 	gCV_DisableRadio = new Convar("shavit_misc_disableradio", "1", "Block radio commands.\n0 - Disabled (radio commands work)\n1 - Enabled (radio commands are blocked)", 0, true, 0.0, true, 1.0);
 	gCV_Scoreboard = new Convar("shavit_misc_scoreboard", "1", "Manipulate scoreboard so score is -{time} and deaths are {rank})?\nDeaths part requires shavit-rankings.\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
-	gCV_WeaponCommands = new Convar("shavit_misc_weaponcommands", "2", "Enable sm_usp, sm_glock and sm_knife?\n0 - Disabled\n1 - Enabled\n2 - Also give infinite reserved ammo.\n3 - Also give infinite clip ammo.", 0, true, 0.0, true, 3.0);
+	gCV_WeaponCommands = new Convar("shavit_misc_weaponcommands", "2", "Enable sm_usp, sm_glock, sm_knife and sm_deagle?\n0 - Disabled\n1 - Enabled\n2 - Also give infinite reserved ammo.\n3 - Also give infinite clip ammo.", 0, true, 0.0, true, 3.0);
 	gCV_WeaponsSpawnGood = new Convar("shavit_misc_weaponsspawngood", "1", "Make glocks spawn on burst-fire and USPs spawn with a silencer on.", 0, true, 0.0, true, 1.0);
 	gCV_PlayerOpacity = new Convar("shavit_misc_playeropacity", "69", "Player opacity (alpha) to set on spawn.\n-1 - Disabled\nValue can go up to 255. 0 for invisibility.", 0, true, -1.0, true, 255.0);
 	gCV_StaticPrestrafe = new Convar("shavit_misc_staticprestrafe", "1", "Force prestrafe for every pistol.\n250 is the default value and some styles will have 260.\n0 - Disabled\n1 - Enabled", 0, true, 0.0, true, 1.0);
@@ -1932,11 +1933,18 @@ public Action Command_Weapon(int client, int args)
 	{
 		strcopy(sWeapon, 32, (gEV_Type == Engine_CSS)? "weapon_usp":"weapon_usp_silencer");
 	}
+
 	else if(StrContains(sCommand, "glock", false) != -1)
 	{
 		strcopy(sWeapon, 32, "weapon_glock");
 	}
-	else
+
+	else if(StrContains(sCommand, "deagle", false) != -1)
+	{
+		strcopy(sWeapon, 32, "weapon_deagle");
+	}
+
+    	else
 	{
 		strcopy(sWeapon, 32, "weapon_knife");
 		iSlot = CS_SLOT_KNIFE;
