@@ -248,6 +248,7 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_prac", Command_Noclip, "Toggles noclip. (sm_nc alias)");
 	RegConsoleCmd("sm_practice", Command_Noclip, "Toggles noclip. (sm_nc alias)");
 	RegConsoleCmd("sm_nc", Command_Noclip, "Toggles noclip.");
+	RegConsoleCmd("sm_p", Command_Noclip, "Toggles noclip.");
 	RegConsoleCmd("sm_noclipme", Command_Noclip, "Toggles noclip. (sm_nc alias)");
 	AddCommandListener(CommandListener_Noclip, "+noclip");
 	AddCommandListener(CommandListener_Noclip, "-noclip");

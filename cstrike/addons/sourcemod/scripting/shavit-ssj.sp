@@ -355,7 +355,7 @@ void PrintStats( int client, int target, any stats[SSJStats] )
 {
     if( g_nJumps[target] == 1 && g_Settings[client] & SSJ_PRESPEED )
     {
-        ColorPrintToChat( client, "{RGB}4d4dffPrespeed{default}: {RGB}0000ff%.2f", stats[SSJ_Speed] );
+        ColorPrintToChat( client, "{RGB}d32a35Prespeed{default}: {RGB}ffd51f%.2f", stats[SSJ_Speed] );
         return;
     }
 
@@ -386,32 +386,32 @@ void PrintStats( int client, int target, any stats[SSJStats] )
 
     if( g_Settings[client] & SSJ_JUMPNUMBER )
     {
-        Format( message, sizeof(message), "%s{RGB}00cc00Jump{default}: {RGB}0000ff%i {default}| ", message, g_nJumps[target] );
+        Format( message, sizeof(message), "%s{RGB}d32a35Jump{default}: {RGB}ffd51f%i {default}| ", message, g_nJumps[target] );
     }
     if( g_Settings[client] & SSJ_SPEED )
     {
-        Format( message, sizeof(message), "%s{RGB}00cc00Speed{default}: {RGB}0000ff%.2f {default}| ", message, stats[SSJ_Speed] );
+        Format( message, sizeof(message), "%s{RGB}d32a35Speed{default}: {RGB}ffd51f%.2f {default}| ", message, stats[SSJ_Speed] );
     }
     if( g_Settings[client] & SSJ_DELTASPEED )
     {
         float deltaspeed = stats[SSJ_Speed] - lastStats[SSJ_Speed];
-        Format( message, sizeof(message), "%s{RGB}00cc00Δ Speed{default}: %s%.2f {default}| ", message, (deltaspeed > 0.0) ? "{RGB}6fde48+" : "{RGB}f55c5c", deltaspeed );
+        Format( message, sizeof(message), "%s{RGB}d32a35Δ Speed{default}: %s%.2f {default}| ", message, (deltaspeed > 0.0) ? "{RGB}6fde48+" : "{RGB}f55c5c", deltaspeed );
     }
     if( g_Settings[client] & SSJ_SYNC )
     {
         int syncedticks = stats[SSJ_SyncedTicks] - lastStats[SSJ_SyncedTicks];
         float sync = float(syncedticks) / tickcount;
-        Format( message, sizeof(message), "%s{RGB}00cc00Sync{default}: {RGB}0000ff%.2f {default}| ", message, sync * 100.0 );
+        Format( message, sizeof(message), "%s{RGB}d32a35Sync{default}: {RGB}ffd51f%.2f {default}| ", message, sync * 100.0 );
     }
     if( g_Settings[client] & SSJ_STRAFETIME )
     {
         int strafedticks = stats[SSJ_StrafedTicks] - lastStats[SSJ_StrafedTicks];
         float strafetime = float(strafedticks) / tickcount;
-        Format( message, sizeof(message), "%s{RGB}00cc00Strafe %{default}: {RGB}0000ff%.2f {default}| ", message, strafetime * 100.0 );
+        Format( message, sizeof(message), "%s{RGB}d32a35Strafe %{default}: {RGB}ffd51f%.2f {default}| ", message, strafetime * 100.0 );
     }
     if( g_Settings[client] & SSJ_GAIN )
     {
-        Format( message, sizeof(message), "%s{RGB}00cc00Gain{default}: {RGB}0000ff%.2f {default}| ", message, gain * 100.0 );
+        Format( message, sizeof(message), "%s{RGB}d32a35Gain{default}: {RGB}ffd51f%.2f {default}| ", message, gain * 100.0 );
     }
     if( g_Settings[client] & SSJ_EFFICIENCY )
     {
@@ -424,25 +424,25 @@ void PrintStats( int client, int target, any stats[SSJStats] )
 
         float efficiency = displacementLength / distanceTravelled;
 
-        Format( message, sizeof(message), "%s{RGB}00cc00Efficiency{default}: {RGB}0000ff%.2f {default}| ", message, efficiency * 100.0 );
+        Format( message, sizeof(message), "%s{RGB}d32a35Efficiency{default}: {RGB}ffd51f%.2f {default}| ", message, efficiency * 100.0 );
     }
     if( g_Settings[client] & SSJ_DELTAHEIGHT )
     {
         float deltaheight = stats[SSJ_Pos][2] - lastStats[SSJ_Pos][2];
-        Format( message, sizeof(message), "%s{RGB}00cc00Δ Height{default}: {RGB}0000ff%s%.2f {default}| ", message, (deltaheight > 0.0) ? "+" : "", deltaheight );
+        Format( message, sizeof(message), "%s{RGB}d32a35Δ Height{default}: {RGB}ffd51f%s%.2f {default}| ", message, (deltaheight > 0.0) ? "+" : "", deltaheight );
     }
     if( g_Settings[client] & SSJ_TIME )
     {
         char sTime[32];
         FormatSeconds( Shavit_GetClientTime( target ), sTime, sizeof(sTime), false );
-        Format( message, sizeof(message), "%s{RGB}00cc00Time{default}: {RGB}0000ff%s {default}| ", message, sTime );
+        Format( message, sizeof(message), "%s{RGB}d32a35Time{default}: {RGB}ffd51f%s {default}| ", message, sTime );
     }
     if( g_Settings[client] & SSJ_DELTATIME )
     {
         float time = tickcount * GetTickInterval();
         char sTime[32];
         FormatSeconds( time, sTime, sizeof(sTime), false );
-        Format( message, sizeof(message), "%s{RGB}00cc00Δ Time{default}: {RGB}0000ff%s {default}| ", message, sTime );
+        Format( message, sizeof(message), "%s{RGB}d32a35Δ Time{default}: {RGB}ffd51f%s {default}| ", message, sTime );
     }
 
     message[strlen(message) - 2] = '\0';
