@@ -1,0 +1,24 @@
+"Phrases"
+{
+	// ---------- Messages ---------- //
+	"PrintFirstJumpTick"
+	{
+		"#format"   "{1:s},{2:d},{3:s}"
+		"en"        "First Jump @{1}{2}{3} ticks."
+	}
+	"ZeroTick"
+	{
+		"#format"	"{1:s},{2:s}"
+		"en"		"First Jump @{1}0 {2}ticks."
+	}
+	"FirstJumpTickEnabled"
+	{
+		"#format"	"{1:s}"
+		"en"		"Jump Tick {1}Enabled"
+	}
+	"FirstJumpTickDisabled"
+	{
+		"#format"	"{1:s}"
+		"en"		"Jump Tick {1}Disabled"
+	}
+}
