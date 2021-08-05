@@ -28,6 +28,7 @@ cstrike/cfg/sourcemod/plugin.sourcejump.cfg
 !cstrike/addons/sourcemod/translations/**
 !cstrike/addons/sourcemod/extensions/**
 !cstrike/addons/sourcemod/configs/**
+!cstrike/addons/sourcemod/gamedata/**
 cstrike/addons/sourcemod/configs/databases.cfg
 cstrike/addons/sourcemod/configs/admins_simple.ini
 
