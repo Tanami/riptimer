@@ -1,0 +1,54 @@
+"Games"
+{
+	"cstrike"
+	{
+		"Signatures"
+		{
+			"SendPropAngle"
+			{
+				"library"	"server"
+				"linux"		"@_Z13SendPropAnglePKciiiiPFvPK8SendPropPKvS5_P8DVariantiiE"
+			}
+		}
+	}
+	"#default"
+	{
+		"Functions"
+		{
+			"SendPropAngle"
+			{
+				"signature" "SendPropAngle"
+				"callconv" "cdecl"
+				"hooktype" "raw"
+				"return" "void"
+				"arguments"
+				{
+					"pProp"
+					{
+						"type" "objectptr"
+					}
+					"pStruct"
+					{
+						"type" "cbaseentity"
+					}
+					"pData"
+					{
+						"type" "vectorptr"
+					}
+					"pOut"
+					{
+						"type" "objectptr"
+					}
+					"iElement"
+					{
+						"type" "int"
+					}
+					"objectID"
+					{
+						"type" "int"
+					}
+				}
+			}
+		}
+	}
+}
