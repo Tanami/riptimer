@@ -160,6 +160,7 @@ Convar gCV_Height = null;
 Convar gCV_Offset = null;
 Convar gCV_EnforceTracks = null;
 Convar gCV_BoxOffset = null;
+Convar gCV_PrebuiltVisualOffset = null;
 
 // handles
 Handle gH_DrawEverything = null;
@@ -296,10 +297,12 @@ public void OnPluginStart()
 	gCV_Offset = new Convar("shavit_zones_offset", "1.0", "When calculating a zone's *VISUAL* box, by how many units, should we scale it to the center?\n0.0 - no downscaling. Values above 0 will scale it inward and negative numbers will scale it outwards.\nAdjust this value if the zones clip into walls.");
 	gCV_EnforceTracks = new Convar("shavit_zones_enforcetracks", "1", "Enforce zone tracks upon entry?\n0 - allow every zone except for start/end to affect users on every zone.\n1 - require the user's track to match the zone's track.", 0, true, 0.0, true, 1.0);
 	gCV_BoxOffset = new Convar("shavit_zones_box_offset", "16", "Offset zone trigger boxes by this many unit\n0 - matches players bounding box\n16 - matches players center");
+	gCV_PrebuiltVisualOffset = new Convar("shavit_zones_prebuilt_visual_offset", "0", "YOU DONT NEED TO TOUCH THIS USUALLY.\nUsed to fix the VISUAL beam offset for prebuilt zones on a map.\nExample maps you'd want to use 16 on: bhop_tranquility and bhop_amaranthglow");
 
 	gCV_Interval.AddChangeHook(OnConVarChanged);
 	gCV_UseCustomSprite.AddChangeHook(OnConVarChanged);
 	gCV_Offset.AddChangeHook(OnConVarChanged);
+	gCV_PrebuiltVisualOffset.AddChangeHook(OnConVarChanged);
 
 	Convar.AutoExecConfig();
 
@@ -372,8 +375,7 @@ public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] n
 		delete gH_DrawEverything;
 		gH_DrawEverything = CreateTimer(gCV_Interval.FloatValue, Timer_DrawEverything, INVALID_HANDLE, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	}
-
-	else if(convar == gCV_Offset && gI_MapZones > 0)
+	else if ((convar == gCV_Offset || convar == gCV_PrebuiltVisualOffset) && gI_MapZones > 0)
 	{
 		for(int i = 0; i < gI_MapZones; i++)
 		{
@@ -389,10 +391,10 @@ public void OnConVarChanged(ConVar convar, const char[] oldValue, const char[] n
 			gV_MapZones_Visual[i][7][1] = gV_MapZones[i][1][1];
 			gV_MapZones_Visual[i][7][2] = gV_MapZones[i][1][2];
 
-			CreateZonePoints(gV_MapZones_Visual[i], gCV_Offset.FloatValue);
+			float offset = -(gA_ZoneCache[i].bPrebuilt ? gCV_PrebuiltVisualOffset.FloatValue : 0.0) + gCV_Offset.FloatValue;
+			CreateZonePoints(gV_MapZones_Visual[i], offset);
 		}
 	}
-
 	else if(convar == gCV_UseCustomSprite && !StrEqual(oldValue, newValue))
 	{
 		LoadZoneSettings();
@@ -513,7 +515,7 @@ public int Native_GetZoneFlags(Handle handler, int numParams)
 
 public int Native_InsideZone(Handle handler, int numParams)
 {
-	return InsideZone(GetNativeCell(1), GetNativeCell(2), GetNativeCell(3));
+	return InsideZone(GetNativeCell(1), GetNativeCell(2), (numParams > 2) ? GetNativeCell(3) : -1);
 }
 
 public int Native_InsideZoneGetID(Handle handler, int numParams)
@@ -1181,7 +1183,8 @@ public void AddZoneToCache(int type, float corner1_x, float corner1_y, float cor
 	gV_MapZones[gI_MapZones][1][1] = gV_MapZones_Visual[gI_MapZones][7][1] = corner2_y;
 	gV_MapZones[gI_MapZones][1][2] = gV_MapZones_Visual[gI_MapZones][7][2] = corner2_z;
 
-	CreateZonePoints(gV_MapZones_Visual[gI_MapZones], gCV_Offset.FloatValue);
+	float offset = -(prebuilt ? gCV_PrebuiltVisualOffset.FloatValue : 0.0) + gCV_Offset.FloatValue;
+	CreateZonePoints(gV_MapZones_Visual[gI_MapZones], offset);
 
 	gV_ZoneCenter[gI_MapZones][0] = (gV_MapZones[gI_MapZones][0][0] + gV_MapZones[gI_MapZones][1][0]) / 2.0;
 	gV_ZoneCenter[gI_MapZones][1] = (gV_MapZones[gI_MapZones][0][1] + gV_MapZones[gI_MapZones][1][1]) / 2.0;
@@ -2517,25 +2520,26 @@ public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float 
 
 					ShowPanel(client, 2);
 				}
-
 				else if(gI_MapStep[client] == 2)
 				{
-					origin[2] += gCV_Height.FloatValue;
-					gV_Point2[client] = origin;
+					if (origin[0] == gV_Point1[client][0] || origin[1] == gV_Point1[client][1])
+					{
+						ShowPanel(client, 2);
+					}
+					else
+					{
+						origin[2] += gCV_Height.FloatValue;
+						gV_Point2[client] = origin;
 
-					gI_MapStep[client]++;
+						gI_MapStep[client]++;
 
-					CreateEditMenu(client);
+						CreateEditMenu(client);
+					}
 				}
 			}
-
-			gB_Button[client] = true;
 		}
 
-		else
-		{
-			gB_Button[client] = false;
-		}
+		gB_Button[client] = (buttons & button) > 0;
 	}
 
 	if(InsideZone(client, Zone_Slide, (gCV_EnforceTracks.BoolValue)? track:-1) && GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1)
@@ -3448,7 +3452,7 @@ public void StartTouchPost(int entity, int other)
 
 		case Zone_End:
 		{
-			if(status != Timer_Stopped && !Shavit_IsPaused(other) && Shavit_GetClientTrack(other) == gA_ZoneCache[gI_EntityZone[entity]].iZoneTrack)
+			if (status == Timer_Running && Shavit_GetClientTrack(other) == gA_ZoneCache[gI_EntityZone[entity]].iZoneTrack)
 			{
 				Shavit_FinishMap(other, gA_ZoneCache[gI_EntityZone[entity]].iZoneTrack);
 			}
@@ -3460,7 +3464,7 @@ public void StartTouchPost(int entity, int other)
 			char special[sizeof(stylestrings_t::sSpecialString)];
 			Shavit_GetStyleStrings(Shavit_GetBhopStyle(other), sSpecialString, special, sizeof(special));
 
-			if(status != Timer_Stopped && Shavit_GetClientTrack(other) == gA_ZoneCache[gI_EntityZone[entity]].iZoneTrack && (num > gI_LastStage[other] || StrContains(special, "segments") != -1 || StrContains(special, "TAS") != -1 || Shavit_IsPracticeMode(other)))
+			if (status == Timer_Running && Shavit_GetClientTrack(other) == gA_ZoneCache[gI_EntityZone[entity]].iZoneTrack && (num > gI_LastStage[other] || StrContains(special, "segments") != -1 || StrContains(special, "TAS") != -1 || Shavit_IsPracticeMode(other)))
 			{
 				gI_LastStage[other] = num;
 				char sTime[32];

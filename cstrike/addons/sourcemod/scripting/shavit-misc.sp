@@ -63,7 +63,7 @@ EngineVersion gEV_Type = Engine_Unknown;
 
 char gS_RadioCommands[][] = { "coverme", "takepoint", "holdpos", "regroup", "followme", "takingfire", "go", "fallback", "sticktog",
 	"getinpos", "stormfront", "report", "roger", "enemyspot", "needbackup", "sectorclear", "inposition", "reportingin",
-	"getout", "negative", "enemydown", "compliment", "thanks", "cheer", "go_a", "go_b", "sorry", "needrop" };
+	"getout", "negative", "enemydown", "compliment", "thanks", "cheer", "go_a", "go_b", "sorry", "needrop", "playerradio", "playerchatwheel", "player_ping", "chatwheel_ping" };
 
 bool gB_Hide[MAXPLAYERS+1];
 bool gB_Late = false;
@@ -81,6 +81,7 @@ int gI_LastWeaponTick[MAXPLAYERS+1];
 ArrayList gA_Checkpoints[MAXPLAYERS+1];
 int gI_CurrentCheckpoint[MAXPLAYERS+1];
 int gI_TimesTeleported[MAXPLAYERS+1];
+bool gB_InCheckpointMenu[MAXPLAYERS+1];
 
 int gI_CheckpointsSettings[MAXPLAYERS+1];
 
@@ -133,6 +134,8 @@ Convar gCV_WRMessages = null;
 Convar gCV_BhopSounds = null;
 Convar gCV_RestrictNoclip = null;
 Convar gCV_BotFootsteps = null;
+ConVar gCV_ExperimentalSegmentedEyeAngleFix = null;
+ConVar gCV_PauseMovement = null;
 
 // external cvars
 ConVar sv_disable_immunity_alpha = null;
@@ -253,6 +256,8 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_noclipme", Command_Noclip, "Toggles noclip. (sm_nc alias)");
 	AddCommandListener(CommandListener_Noclip, "+noclip");
 	AddCommandListener(CommandListener_Noclip, "-noclip");
+	// Hijack sourcemod's sm_noclip from funcommands to work when no args are specified.
+	AddCommandListener(CommandListener_Sourcemod_Noclip, "sm_noclip");
 
 	// hook teamjoins
 	AddCommandListener(Command_Jointeam, "jointeam");
@@ -329,6 +334,7 @@ public void OnPluginStart()
 	gCV_BhopSounds = new Convar("shavit_misc_bhopsounds", "1", "Should bhop (landing and jumping) sounds be muted?\n0 - Disabled\n1 - Blocked while !hide is enabled\n2 - Always blocked", 0,  true, 0.0, true, 2.0);
 	gCV_RestrictNoclip = new Convar("shavit_misc_restrictnoclip", "0", "Should noclip be be restricted\n0 - Disabled\n1 - No vertical velocity while in noclip in start zone\n2 - No noclip in start zone", 0, true, 0.0, true, 2.0);
 	gCV_BotFootsteps = new Convar("shavit_misc_botfootsteps", "1", "Enable footstep sounds for replay bots. Only works if shavit_misc_bhopsounds is less than 2.", 0, true, 0.0, true, 1.0);
+	gCV_ExperimentalSegmentedEyeAngleFix = new Convar("shavit_misc_experimental_segmented_eyeangle_fix", "1", "When teleporting to a segmented checkpoint, the player's old eye-angles persist in replay-frames for as many ticks they're behind the server in latency. This applies the teleport-position angles to the replay-frame for that many ticks.", 0, true, 0.0, true, 1.0);
 
 	gCV_HideRadar.AddChangeHook(OnConVarChanged);
 	Convar.AutoExecConfig();
@@ -347,29 +353,17 @@ public void OnPluginStart()
 		CreateTimer(1.0, Timer_Scoreboard, 0, TIMER_REPEAT);
 	}
 
-	// late load
-	if(gB_Late)
-	{
-		for(int i = 1; i <= MaxClients; i++)
-		{
-			if(IsValidClient(i))
-			{
-				OnClientPutInServer(i);
-
-				if(AreClientCookiesCached(i))
-				{
-					OnClientCookiesCached(i);
-				}
-			}
-		}
-	}
-
 	// modules
 	gB_Eventqueuefix = LibraryExists("eventqueuefix");
 	gB_Rankings = LibraryExists("shavit-rankings");
 	gB_Replay = LibraryExists("shavit-replay");
 	gB_Zones = LibraryExists("shavit-zones");
 	gB_Chat = LibraryExists("shavit-chat");
+}
+
+public void OnAllPluginsLoaded()
+{
+	gCV_PauseMovement = FindConVar("shavit_core_pause_movement");
 }
 
 void LoadDHooks()
@@ -527,20 +521,26 @@ public void Shavit_OnChatConfigLoaded()
 	}
 }
 
+void DeletePersistentDataFromClient(int client)
+{
+	persistent_data_t aData;
+	int iIndex = FindPersistentData(client, aData);
+
+	if (iIndex != -1)
+	{
+		DeletePersistentData(iIndex, aData);
+	}
+
+	gB_SaveStates[client] = false;
+}
+
 public void Shavit_OnStyleChanged(int client, int oldstyle, int newstyle, int track, bool manual)
 {
 	gI_Style[client] = newstyle;
 
 	if (gB_SaveStates[client] && manual)
 	{
-		persistent_data_t aData;
-		int iIndex = FindPersistentData(client, aData);
-
-		if (iIndex != -1)
-		{
-			gB_SaveStates[client] = false;
-			DeletePersistentData(iIndex, aData);
-		}
+		DeletePersistentDataFromClient(client);
 	}
 
 	if(StrContains(gS_StyleStrings[newstyle].sSpecialString, "segments") != -1)
@@ -557,17 +557,33 @@ public void Shavit_OnStyleChanged(int client, int oldstyle, int newstyle, int tr
 	}
 }
 
-public void OnConfigsExecuted()
+void LoadMapFixes()
 {
-	if(sv_disable_immunity_alpha != null)
+	char sPath[PLATFORM_MAX_PATH];
+	BuildPath(Path_SM, sPath, PLATFORM_MAX_PATH, "configs/shavit-mapfixes.cfg");
+
+	KeyValues kv = new KeyValues("shavit-mapfixes");
+	
+	if (kv.ImportFromFile(sPath) && kv.JumpToKey(gS_CurrentMap) && kv.GotoFirstSubKey(false))
 	{
-		sv_disable_immunity_alpha.BoolValue = true;
+		do {
+			char key[128];
+			char value[128];
+			kv.GetSectionName(key, sizeof(key));
+			kv.GetString(NULL_STRING, value, sizeof(value));
+
+			PrintToServer(">>>> mapfixes: %s \"%s\"", key, value);
+
+			ConVar cvar = FindConVar(key);
+
+			if (cvar)
+			{
+				cvar.SetString(value, true, true);
+			}
+		} while (kv.GotoNextKey(false));
 	}
 
-	if (sv_disable_radar != null && gCV_HideRadar.BoolValue)
-	{
-		sv_disable_radar.BoolValue = true;
-	}
+	delete kv;
 }
 
 void CreateSpawnPoint(int iTeam, float fOrigin[3], float fAngles[3])
@@ -592,6 +608,28 @@ public void OnMapStart()
 	GetCurrentMap(gS_CurrentMap, 192);
 	GetMapDisplayName(gS_CurrentMap, gS_CurrentMap, 192);
 
+	if (gB_Late)
+	{
+		gB_Late = false;
+		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
+		Shavit_OnChatConfigLoaded();
+		OnAutoConfigsBuffered();
+
+		for(int i = 1; i <= MaxClients; i++)
+		{
+			if(IsValidClient(i))
+			{
+				OnClientPutInServer(i);
+
+				if(AreClientCookiesCached(i))
+				{
+					OnClientCookiesCached(i);
+					Shavit_OnStyleChanged(i, 0, Shavit_GetBhopStyle(i), Shavit_GetClientTrack(i), false);
+				}
+			}
+		}
+	}
+
 	if (!StrEqual(gS_CurrentMap, gS_PreviousMap, false))
 	{
 		int iLength = gA_PersistentData.Length;
@@ -602,6 +640,24 @@ public void OnMapStart()
 			gA_PersistentData.GetArray(i, aData);
 			DeletePersistentData(i, aData);
 		}
+	}
+}
+
+public void OnAutoConfigsBuffered()
+{
+	LoadMapFixes();
+}
+
+public void OnConfigsExecuted()
+{
+	if(sv_disable_immunity_alpha != null)
+	{
+		sv_disable_immunity_alpha.BoolValue = true;
+	}
+
+	if (sv_disable_radar != null && gCV_HideRadar.BoolValue)
+	{
+		sv_disable_radar.BoolValue = true;
 	}
 
 	if(gCV_CreateSpawnPoints.IntValue > 0)
@@ -659,13 +715,6 @@ public void OnMapStart()
 				}
 			}
 		}
-	}
-
-	if(gB_Late)
-	{
-		gB_Late = false;
-		Shavit_OnStyleConfigLoaded(Shavit_GetStyleCount());
-		Shavit_OnChatConfigLoaded();
 	}
 
 	if(gCV_AdvertisementInterval.FloatValue > 0.0)
@@ -1209,6 +1258,11 @@ public void Shavit_OnPause(int client, int track)
 	{
 		SetClientEventsPaused(client, true);
 	}
+
+	if (!gB_SaveStates[client])
+	{
+		PersistData(client, false);
+	}
 }
 
 public void Shavit_OnResume(int client, int track)
@@ -1217,6 +1271,12 @@ public void Shavit_OnResume(int client, int track)
 	{
 		SetClientEventsPaused(client, false);
 	}
+
+	if (gB_SaveStates[client])
+	{
+		// events&outputs won't work properly unless we do this next frame...
+		RequestFrame(LoadPersistentData, GetClientSerial(client));
+	}
 }
 
 public void Shavit_OnStop(int client, int track)
@@ -1224,6 +1284,11 @@ public void Shavit_OnStop(int client, int track)
 	if (gB_Eventqueuefix)
 	{
 		SetClientEventsPaused(client, false);
+	}
+
+	if (gB_SaveStates[client])
+	{
+		DeletePersistentDataFromClient(client);
 	}
 }
 
@@ -1448,8 +1513,7 @@ void PersistData(int client, bool disconnected)
 		if (gB_Replay && aData.cpcache.aFrames == null)
 		{
 			aData.cpcache.aFrames = Shavit_GetReplayData(client, true);
-			aData.cpcache.iPreFrames = Shavit_GetPlayerPreFrame(client);
-			aData.cpcache.iTimerPreFrames = Shavit_GetPlayerTimerFrame(client);
+			aData.cpcache.iPreFrames = Shavit_GetPlayerPreFrames(client);
 		}
 	}
 	else
@@ -1552,9 +1616,9 @@ void ResetCheckpoints(int client)
 	gI_CurrentCheckpoint[client] = 0;
 }
 
-public Action OnTakeDamage(int victim, int& attacker)
+void ClearViewPunch(int victim)
 {
-	if(gB_Hide[victim] || gCV_GodMode.IntValue >= 2)
+	if (1 <= victim <= MaxClients)
 	{
 		if(gEV_Type == Engine_CSGO)
 		{
@@ -1568,39 +1632,53 @@ public Action OnTakeDamage(int victim, int& attacker)
 			SetEntPropVector(victim, Prop_Send, "m_vecPunchAngleVel", NULL_VECTOR);
 		}
 	}
+}
+
+public Action OnTakeDamage(int victim, int& attacker)
+{
+	bool bBlockDamage;
 
 	switch(gCV_GodMode.IntValue)
 	{
 		case 0:
 		{
-			return Plugin_Continue;
+			bBlockDamage = false;
 		}
-
 		case 1:
 		{
 			// 0 - world/fall damage
 			if(attacker == 0)
 			{
-				return Plugin_Handled;
+				bBlockDamage = true;
 			}
 		}
-
 		case 2:
 		{
 			if(IsValidClient(attacker))
 			{
-				return Plugin_Handled;
+				bBlockDamage = true;
 			}
 		}
-
-		// else
 		default:
 		{
-			return Plugin_Handled;
+			bBlockDamage = true;
 		}
 	}
 
-	return Plugin_Continue;
+	if (gB_Hide[victim] || bBlockDamage || IsFakeClient(victim))
+	{
+		ClearViewPunch(victim);
+
+		for (int i = 1; i <= MaxClients; i++)
+		{
+			if (i != victim && IsValidClient(i) && GetSpectatorTarget(i) == victim)
+			{
+				ClearViewPunch(i);
+			}
+		}
+	}
+
+	return bBlockDamage ? Plugin_Handled : Plugin_Continue;
 }
 
 public void OnWeaponDrop(int client, int entity)
@@ -1864,35 +1942,37 @@ bool Teleport(int client, int targetserial)
 	return true;
 }
 
-void Frame_WeaponsSpawnGood(int ref)
+public Action Hook_GunTouch(int entity, int client)
 {
-	int entity = EntRefToEntIndex(ref);
-
-	if (entity > 0)
+	if (1 <= client <= MaxClients)
 	{
 		char classname[64];
 		GetEntityClassname(entity, classname, sizeof(classname));
 
 		if (StrEqual(classname, "weapon_glock"))
 		{
-			SetEntProp(entity, Prop_Send, "m_bBurstMode", 1);
+			if (!IsValidClient(client) || !IsFakeClient(client))
+			{
+				SetEntProp(entity, Prop_Send, "m_bBurstMode", 1);
+			}
 		}
-		else if (gEV_Type == Engine_CSS && StrEqual(classname, "weapon_usp")) // usp
+		else if (gEV_Type == Engine_CSS && StrEqual(classname, "weapon_usp"))
 		{
 			SetEntProp(entity, Prop_Send, "m_bSilencerOn", 1);
 			SetEntProp(entity, Prop_Send, "m_weaponMode", 1);
+			SetEntPropFloat(entity, Prop_Send, "m_flDoneSwitchingSilencer", GetGameTime() - 0.1);  
 		}
 	}
+
+	return Plugin_Continue;
 }
 
 public void OnEntityCreated(int entity, const char[] classname)
 {
-	if (gCV_WeaponsSpawnGood.BoolValue)
+	if (((gCV_WeaponsSpawnGood.IntValue & 1) && gEV_Type == Engine_CSS && StrEqual(classname, "weapon_usp"))
+	||  ((gCV_WeaponsSpawnGood.IntValue & 2) && StrEqual(classname, "weapon_glock")))
 	{
-		if (StrEqual(classname, "weapon_glock") || (gEV_Type == Engine_CSS && StrEqual(classname, "weapon_usp")))
-		{
-			RequestFrame(Frame_WeaponsSpawnGood, EntIndexToEntRef(entity));
-		}
+		SDKHook(entity, SDKHook_Touch, Hook_GunTouch);
 	}
 }
 
@@ -2038,6 +2118,11 @@ public Action Command_Save(int client, int args)
 	if(SaveCheckpoint(client))
 	{ 
 		Shavit_PrintToChat(client, "%T", "MiscCheckpointsSaved", client, gI_CurrentCheckpoint[client], gS_ChatStrings.sVariable, gS_ChatStrings.sText);
+
+		if (gB_InCheckpointMenu[client])
+		{
+			OpenNormalCPMenu(client);
+		}
 	}
 
 	return Plugin_Handled;
@@ -2216,7 +2301,7 @@ void OpenNormalCPMenu(int client)
 		return;
 	}
 
-	Menu menu = new Menu(MenuHandler_Checkpoints, MENU_ACTIONS_DEFAULT|MenuAction_DisplayItem);
+	Menu menu = new Menu(MenuHandler_Checkpoints, MENU_ACTIONS_DEFAULT|MenuAction_DisplayItem|MenuAction_Display);
 
 	if(!bSegmented)
 	{
@@ -2376,6 +2461,14 @@ public int MenuHandler_Checkpoints(Menu menu, MenuAction action, int param1, int
 		Format(sDisplay, 64, "[%s] %s", ((gI_CheckpointsSettings[param1] & StringToInt(sInfo)) > 0)? "x":" ", sDisplay);
 
 		return RedrawMenuItem(sDisplay);
+	}
+	else if (action == MenuAction_Display)
+	{
+		gB_InCheckpointMenu[param1] = true;
+	}
+	else if (action == MenuAction_Cancel)
+	{
+		gB_InCheckpointMenu[param1] = false;
 	}
 	else if(action == MenuAction_End)
 	{
@@ -2554,7 +2647,7 @@ void SaveCheckpointCache(int target, cp_cache_t cpcache, bool actually_a_checkpo
 		GetEntPropString(target, Prop_Data, "m_iName", cpcache.sTargetname, 64);
 	}
 
-	if (cpcache.iMoveType == MOVETYPE_NONE)
+	if (cpcache.iMoveType == MOVETYPE_NONE || (cpcache.iMoveType == MOVETYPE_NOCLIP && actually_a_checkpoint))
 	{
 		cpcache.iMoveType = MOVETYPE_WALK;
 	}
@@ -2609,8 +2702,7 @@ void SaveCheckpointCache(int target, cp_cache_t cpcache, bool actually_a_checkpo
 	if (cpcache.bSegmented && gB_Replay && actually_a_checkpoint && cpcache.aFrames == null)
 	{
 		cpcache.aFrames = Shavit_GetReplayData(target, false);
-		cpcache.iPreFrames = Shavit_GetPlayerPreFrame(target);
-		cpcache.iTimerPreFrames = Shavit_GetPlayerTimerFrame(target);
+		cpcache.iPreFrames = Shavit_GetPlayerPreFrames(target);
 	}
 
 	if (gB_Eventqueuefix && !IsFakeClient(target))
@@ -2748,6 +2840,15 @@ void LoadCheckpointCache(int client, cp_cache_t cpcache, bool isPersistentData)
 	else
 	{
 		Shavit_SetPracticeMode(client, false, true);
+
+		float latency = GetClientLatency(client, NetFlow_Both);
+
+		if (gCV_ExperimentalSegmentedEyeAngleFix.BoolValue && latency > 0.0)
+		{
+			int ticks = RoundToCeil(latency / GetTickInterval()) + 1;
+			//PrintToChat(client, "%f %f %d", latency, GetTickInterval(), ticks);
+			Shavit_HijackAngles(client, cpcache.fAngles[0], cpcache.fAngles[1], ticks);
+		}
 	}
 
 	SetEntityGravity(client, cpcache.fGravity);
@@ -2756,8 +2857,7 @@ void LoadCheckpointCache(int client, cp_cache_t cpcache, bool isPersistentData)
 	{
 		// if isPersistentData, then CloneHandle() is done instead of ArrayList.Clone()
 		Shavit_SetReplayData(client, cpcache.aFrames, isPersistentData);
-		Shavit_SetPlayerPreFrame(client, cpcache.iPreFrames);
-		Shavit_SetPlayerTimerFrame(client, cpcache.iTimerPreFrames);
+		Shavit_SetPlayerPreFrames(client, cpcache.iPreFrames);
 	}
 
 	if (gB_Eventqueuefix && cpcache.aEvents != null && cpcache.aOutputWaits != null)
@@ -2892,7 +2992,6 @@ public Action Command_Noclip(int client, int args)
 
 		return Plugin_Handled;
 	}
-
 	else if(gCV_NoclipMe.IntValue == 2 && !CheckCommandAccess(client, "admin_noclipme", ADMFLAG_CHEATS))
 	{
 		Shavit_PrintToChat(client, "%T", "LackingAccess", client, gS_ChatStrings.sWarning, gS_ChatStrings.sText);
@@ -2909,18 +3008,22 @@ public Action Command_Noclip(int client, int args)
 
 	if(GetEntityMoveType(client) != MOVETYPE_NOCLIP)
 	{
+		if (gCV_PauseMovement.BoolValue && Shavit_IsPaused(client))
+		{
+			SetEntityMoveType(client, MOVETYPE_NOCLIP);
+			return Plugin_Handled;
+		}
+
 		if(!ShouldDisplayStopWarning(client))
 		{
 			Shavit_StopTimer(client);
 			SetEntityMoveType(client, MOVETYPE_NOCLIP);
 		}
-
 		else
 		{
 			OpenStopWarningMenu(client, DoNoclip);
 		}
 	}
-
 	else
 	{
 		SetEntityMoveType(client, MOVETYPE_WALK);
@@ -2956,6 +3059,17 @@ public Action CommandListener_Noclip(int client, const char[] command, int args)
 	}
 
 	return Plugin_Handled;
+}
+
+public Action CommandListener_Sourcemod_Noclip(int client, const char[] command, int args)
+{
+	if (IsValidClient(client, true) && args < 1)
+	{
+		Command_Noclip(client, 0);
+		return Plugin_Stop;
+	}
+
+	return Plugin_Continue;
 }
 
 public Action Command_Specs(int client, int args)
@@ -3059,7 +3173,7 @@ public Action Shavit_OnStart(int client)
 		return Plugin_Stop;
 	}
 
-	if(gCV_ResetTargetname.BoolValue || Shavit_IsPracticeMode(client)) // practice mode can be abused to break map triggers
+	if(gCV_ResetTargetname.BoolValue)
 	{
 		DispatchKeyValue(client, "targetname", "");
 		SetEntPropString(client, Prop_Data, "m_iClassname", "player");

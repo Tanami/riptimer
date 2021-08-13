@@ -392,9 +392,7 @@ void MakeAngleDiff(int client, float newAngle)
 {
 	gF_PreviousAngle[client] = gF_Angle[client];
 	gF_Angle[client] = newAngle;
-
-	float fAngleDiff = newAngle - gF_PreviousAngle[client];
-	gF_AngleDiff[client] = fAngleDiff - 360.0 * RoundToFloor((fAngleDiff + 180.0) / 360.0);
+	gF_AngleDiff[client] = GetAngleDiff(newAngle, gF_PreviousAngle[client]);
 }
 
 public Action Shavit_OnUserCmdPre(int client, int &buttons, int &impulse, float vel[3], float angles[3], TimerStatus status, int track, int style)
@@ -1269,7 +1267,7 @@ int AddHUDToBuffer_CSGO(int client, huddata_t data, char[] buffer, int maxlen)
 				char sWR[32];
 				FormatSeconds(data.fWR, sWR, 32, false);
 
-				FormatEx(sLine, 128, "%s / %s (%.1f％)", sTime, sWR, ((data.fTime < 0.0 ? 0.0 : data.fTime / data.fWR) * 100));
+				FormatEx(sLine, 128, "%s / %s (%.1f％)", sTime, sWR, ((data.fTime / data.fWR) * 100));
 				AddHUDLine(buffer, maxlen, sLine, iLines);
 				iLines++;
 			}
@@ -1590,7 +1588,19 @@ void UpdateKeyOverlay(int client, Panel panel, bool &draw)
 		return;
 	}
 
-	int buttons = IsValidClient(target) ? gI_Buttons[target] : Shavit_GetReplayButtons(target);
+	float fAngleDiff;
+	int buttons;
+
+	if (IsValidClient(target))
+	{
+		fAngleDiff = gF_AngleDiff[target];
+		buttons = gI_Buttons[target];
+	}
+	else
+	{
+		buttons = Shavit_GetReplayButtons(target, fAngleDiff);
+	}
+
 	int style = (gB_Replay && Shavit_IsReplayEntity(target))? Shavit_GetReplayBotStyle(target):Shavit_GetBhopStyle(target);
 
 	if(!(0 <= style < gI_Styles))
@@ -1606,8 +1616,6 @@ void UpdateKeyOverlay(int client, Panel panel, bool &draw)
 	{
 		FormatEx(sPanelLine, 64, " %d%s%d\n", gI_ScrollCount[target], (gI_ScrollCount[target] > 9)? "   ":"     ", gI_LastScrollCount[target]);
 	}
-
-	float fAngleDiff = IsValidClient(target) ? gF_AngleDiff[target] : 0.0;
 
 	Format(sPanelLine, 128, "%s［%s］　［%s］\n%s  %s  %s\n%s　 %s 　%s\n　%s　　%s", sPanelLine,
 		(buttons & IN_JUMP) > 0? "Ｊ":"ｰ", (buttons & IN_DUCK) > 0? "Ｃ":"ｰ",
@@ -1656,13 +1664,23 @@ void UpdateCenterKeys(int client)
 		return;
 	}
 
-	int buttons = IsValidClient(target) ? gI_Buttons[target] : Shavit_GetReplayButtons(target);
-	float fAngleDiff = IsValidClient(target) ? gF_AngleDiff[target] : 0.0;
+	float fAngleDiff;
+	int buttons;
+
+	if (IsValidClient(target))
+	{
+		fAngleDiff = gF_AngleDiff[target];
+		buttons = gI_Buttons[target];
+	}
+	else
+	{
+		buttons = Shavit_GetReplayButtons(target, fAngleDiff);
+	}
 
 	char sCenterText[80];
-	FormatEx(sCenterText, sizeof(sCenterText), "　%s　　%s\n%s　 %s 　%s\n%s　 %s 　%s\n　%s　　%s",
+	FormatEx(sCenterText, sizeof(sCenterText), "　%s　　%s\n%s   %s   %s\n%s　 %s 　%s\n　%s　　%s",
 		(buttons & IN_JUMP) > 0? "Ｊ":"ｰ", (buttons & IN_DUCK) > 0? "Ｃ":"ｰ",
-		(fAngleDiff > 0) ? "←":" ", (buttons & IN_FORWARD) > 0 ? "Ｗ":"ｰ", (fAngleDiff < 0) ? "→":" ",
+		(fAngleDiff > 0) ? "<":"  ", (buttons & IN_FORWARD) > 0 ? "Ｗ":" ｰ", (fAngleDiff < 0) ? ">":"",
 		(buttons & IN_MOVELEFT) > 0? "Ａ":"ｰ", (buttons & IN_BACK) > 0? "Ｓ":"ｰ", (buttons & IN_MOVERIGHT) > 0? "Ｄ":"ｰ",
 		(buttons & IN_LEFT) > 0? "Ｌ":" ", (buttons & IN_RIGHT) > 0? "Ｒ":" ");
 
@@ -1777,23 +1795,22 @@ void UpdateTopLeftHUD(int client, bool wait)
 			track = Shavit_GetReplayBotTrack(target);
 		}
 
-		if(!(0 <= style < gI_Styles) || !(0 <= track <= TRACKS_SIZE))
+		if ((0 <= style < gI_Styles) && (0 <= track <= TRACKS_SIZE))
 		{
-			return;
-		}
-
-		float fWRTime = Shavit_GetWorldRecord(style, track);
-
-		if(fWRTime != 0.0)
-		{
-			char sWRTime[16];
-			FormatSeconds(fWRTime, sWRTime, 16);
-
-			char sWRName[MAX_NAME_LENGTH];
-			Shavit_GetWRName(style, sWRName, MAX_NAME_LENGTH, track);
+			float fWRTime = Shavit_GetWorldRecord(style, track);
 
 			char sTopLeft[512];
-			FormatEx(sTopLeft, sizeof(sTopLeft), "WR: %s (%s)", sWRTime, sWRName);
+
+			if (fWRTime != 0.0)
+			{
+				char sWRTime[16];
+				FormatSeconds(fWRTime, sWRTime, 16);
+
+				char sWRName[MAX_NAME_LENGTH];
+				Shavit_GetWRName(style, sWRName, MAX_NAME_LENGTH, track);
+
+				FormatEx(sTopLeft, sizeof(sTopLeft), "WR: %s (%s)", sWRTime, sWRName);
+			}
 
 			char sTargetPB[64];
 			FormatSeconds(fTargetPB, sTargetPB, sizeof(sTargetPB));
@@ -1830,7 +1847,6 @@ void UpdateTopLeftHUD(int client, bool wait)
 					}
 				}
 			}
-
 			else if(fSelfPB != 0.0)
 			{
 				Format(sTopLeft, sizeof(sTopLeft), "%s\n%s (#%d)", sTopLeft, sSelfPB, Shavit_GetRankForTime(style, fSelfPB, track));

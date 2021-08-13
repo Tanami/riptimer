@@ -28,7 +28,7 @@
 // A player that gets good times at all styles should be ranked high.
 //
 // Total player points are weighted in the following way: (descending sort of points)
-// points[0] * 0.975^0 + points[1] * 0.975^1 + points[2] * 0.975^2 + ... + points[n] * 0.975^(n-1)
+// points[0] * 0.975^0 + points[1] * 0.975^1 + points[2] * 0.975^2 + ... + points[n] * 0.975^n
 //
 // The ranking leaderboard will be calculated upon: map start.
 // Points are calculated per-player upon: connection/map.
@@ -81,6 +81,7 @@ Convar gCV_LastLoginRecalculate = null;
 Convar gCV_MVPRankOnes = null;
 Convar gCV_MVPRankOnes_Main = null;
 Convar gCV_DefaultTier = null;
+Convar gCV_WRRanks = null;
 
 ranking_t gA_Rankings[MAXPLAYERS+1];
 
@@ -94,6 +95,7 @@ Handle gH_Forwards_OnRankAssigned = null;
 chatstrings_t gS_ChatStrings;
 int gI_Styles = 0;
 
+bool gB_WRsRefreshed = false;
 int gI_WRAmount[MAXPLAYERS+1][2][STYLE_LIMIT];
 int gI_WRAmountAll[MAXPLAYERS+1];
 int gI_WRAmountCvar[MAXPLAYERS+1];
@@ -166,6 +168,7 @@ public void OnPluginStart()
 	gCV_MVPRankOnes = new Convar("shavit_rankings_mvprankones", "2", "Set the players' amount of MVPs to the amount of #1 times they have.\n0 - Disabled\n1 - Enabled, for all styles.\n2 - Enabled, for default style only.\n(CS:S/CS:GO only)", 0, true, 0.0, true, 2.0);
 	gCV_MVPRankOnes_Main = new Convar("shavit_rankings_mvprankones_maintrack", "1", "If set to 0, all tracks will be counted for the MVP stars.\nOtherwise, only the main track will be checked.\n\nRequires \"shavit_stats_mvprankones\" set to 1 or above.\n(CS:S/CS:GO only)", 0, true, 0.0, true, 1.0);
 	gCV_DefaultTier = new Convar("shavit_rankings_default_tier", "1", "Sets the default tier for new maps added.", 0, true, 0.0, true, 10.0);
+	gCV_WRRanks = new Convar("shavit_rankings_wrranks", "1", "Whether to query WR Holders rank and WR count. If you don't care about it being used for chat-rank customization, you can disable this and have less database churn.", 0, true, 0.0, true, 1.0);
 
 	Convar.AutoExecConfig();
 
@@ -358,7 +361,10 @@ public void OnClientConnected(int client)
 
 public void OnClientPutInServer(int client)
 {
-	UpdateWRs(client);
+	if (gB_WRsRefreshed)
+	{
+		UpdateWRs(client);
+	}
 }
 
 public void OnClientPostAdminCheck(int client)
@@ -384,7 +390,10 @@ public void OnMapStart()
 	GetCurrentMap(gS_Map, 160);
 	GetMapDisplayName(gS_Map, gS_Map, 160);
 
-	UpdateWRHolders();
+	if (gCV_WRRanks.BoolValue)
+	{
+		UpdateWRHolders();
+	}
 
 	// Default tier.
 	// I won't repeat the same mistake blacky has done with tier 3 being default..
@@ -473,6 +482,7 @@ public void OnMapEnd()
 {
 	RecalculateAll(gS_Map);
 	gB_TierQueried = false;
+	gB_WRsRefreshed = false;
 }
 
 public void Player_Event(Event event, const char[] name, bool dontBroadcast)
@@ -514,7 +524,22 @@ public void SQL_GetWRs_Callback(Database db, DBResultSet results, const char[] e
 {
 	if(results == null)
 	{
-		LogError("SQL_GetWRs_Callback failed. Reason: %s", error);
+		// Try to recreate temporary tables.
+		// If the db connection drops and disconnects it might be destroying them... but idk.
+		if (StrContains(error, "Table ") != -1 && StrContains(error, " doesn't exist") != -1)
+		{
+			if (gB_WRsRefreshed)
+			{
+				LogError("SQL_GetWRs_Callback failed. Attempting to recreate tables. Error: %s", error);
+				gB_WRsRefreshed = false;
+				RequestFrame(UpdateWRHolders);
+			}
+		}
+		else
+		{
+			LogError("SQL_GetWRs_Callback failed. Reason: %s", error);
+		}
+
 		return;
 	}
 
@@ -751,10 +776,18 @@ public Action Command_RecalcAll(int client, int args)
 	Transaction trans = new Transaction();
 	char sQuery[666];
 
+	FormatEx(sQuery, sizeof(sQuery), "UPDATE %splayertimes SET points = 0;", gS_MySQLPrefix);
+	trans.AddQuery(sQuery);
+	FormatEx(sQuery, sizeof(sQuery), "UPDATE %susers SET points = 0;", gS_MySQLPrefix);
+	trans.AddQuery(sQuery);
+
 	for(int i = 0; i < gI_Styles; i++)
 	{
-		FormatRecalculate("", -1, i, sQuery, sizeof(sQuery));
-		trans.AddQuery(sQuery);
+		if (!Shavit_GetStyleSettingBool(i, "unranked") && Shavit_GetStyleSettingFloat(i, "rankingmultiplier") != 0.0)
+		{
+			FormatRecalculate("", -1, i, sQuery, sizeof(sQuery));
+			trans.AddQuery(sQuery);
+		}
 	}
 
 	gH_SQL.Execute(trans, Trans_OnRecalcSuccess, Trans_OnRecalcFail, (client == 0)? 0:GetClientSerial(client));
@@ -1153,6 +1186,16 @@ public void SQL_GetWRHolders_Callback(Database db, DBResultSet results, const ch
 		else if (type == 2)
 		{
 			gI_WRHoldersCvar = total;
+		}
+	}
+
+	gB_WRsRefreshed = true;
+
+	for (int i = 1; i <= MaxClients; i++)
+	{
+		if (IsValidClient(i))
+		{
+			UpdateWRs(i);
 		}
 	}
 }
