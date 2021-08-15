@@ -233,7 +233,7 @@ public void OnPluginStart()
 	RegConsoleCmd("sm_usp", Command_Weapon, "Spawn a USP.");
 	RegConsoleCmd("sm_glock", Command_Weapon, "Spawn a Glock.");
 	RegConsoleCmd("sm_knife", Command_Weapon, "Spawn a knife.");
-	RegConsoleCmd("sm_deagle", Command_Weapon, "Spawn a Desert Eagle.")
+	RegConsoleCmd("sm_deagle", Command_Weapon, "Spawn a Desert Eagle.");
 
 	// checkpoints
 	RegConsoleCmd("sm_cpmenu", Command_Checkpoints, "Opens the checkpoints menu.");
